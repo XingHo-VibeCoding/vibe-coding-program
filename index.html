@@ -5,23 +5,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>每日一个 AI 概念详解</title>
   <meta name="description" content="用简单易懂的方式，每天讲解一个 AI 核心概念。" />
+  <meta name="theme-color" content="#f6f7f9" />
+  <!--
+    内联 SVG 图标：不额外请求文件，顺带消掉控制台里的 /favicon.ico 404 报错。
+    图标 = 强调色圆角方块 + 白色 AI 两个字。
+  -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f6fed'/%3E%3Ctext x='32' y='44' font-family='Arial,Helvetica,sans-serif' font-size='30' font-weight='700' fill='%23ffffff' text-anchor='middle'%3EAI%3C/text%3E%3C/svg%3E" />
   <style>
+    /* 设计变量沿用 Day 2 占位页的口径（PRD.md §5.5）。Day 9 增量：
+       ① 新增 --accent-text：与 --accent 同色系、深一档，专供「小字号强调文字」。
+          原因：--accent 是为色块与边框选的中间调蓝，直接拿来写 13～18px 的文字时
+          在浅灰底上只有 4.24:1、在浅蓝底上只有 3.98:1，低于 WCAG AA 正文要求的 4.5:1。
+       ② 新增间距刻度：以 4px 为基数，全站间距只从这套刻度里取值，不再随手写数字。 */
     :root {
       --bg: #f6f7f9;
       --card: #ffffff;
       --text: #1a1d21;
       --text-soft: #5b6472;
       --line: #e4e7ec;
-      --accent: #2f6fed;
+      --accent: #2f6fed;        /* 只用于色块 / 边框 / 按钮底，不用于小字号文字 */
+      --accent-text: #2560d8;   /* 小字号强调文字专用：浅灰底 5.23:1，白卡 5.61:1 */
       --accent-soft: #eaf0fe;
       --radius: 14px;
+
+      /* 间距刻度：4px 基数 */
+      --sp-1: 4px;
+      --sp-2: 8px;
+      --sp-3: 12px;
+      --sp-4: 16px;
+      --sp-5: 20px;
+      --sp-6: 24px;
+      --sp-7: 32px;
+      --sp-8: 40px;
+      --sp-9: 56px;
+      --sp-10: 80px;
     }
 
     * { box-sizing: border-box; }
 
+    /* hidden 属性要能盖住下面的 flex 布局，否则隐藏不生效 */
+    [hidden] { display: none !important; }
+
     body {
       margin: 0;
-      padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
         "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
       background: var(--bg);
@@ -33,27 +59,23 @@
     .wrap {
       max-width: 760px;
       margin: 0 auto;
-      padding: 56px 20px 80px;
+      padding: var(--sp-9) var(--sp-5) var(--sp-10);
     }
 
-    header { margin-bottom: 40px; }
-
-    .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: var(--accent-soft);
-      color: var(--accent);
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: .02em;
-    }
+    /* ---------- 顶部：标题 + 一句话定位 ----------
+       Day 9 改动：移除原来的「Day 8 · 首页主视图」徽标。它是开发进度标签，
+       PRD.md §5.2 的首页层级（标题 → 定位 → 计数 → 列表）里没有它，
+       却占着首屏第一行、把 h1 挤下去；同样信息页脚已有，不丢内容。
+       同时把间距拉开：标题块与计数行原来只隔 24px、计数行与列表隔 18px，
+       两者近似等距，读不出层级。现在改成 32px 对 16px，用亲疏表达归属。 */
+    header { margin-bottom: var(--sp-7); }
 
     h1 {
-      margin: 14px 0 10px;
+      margin: 0 0 var(--sp-2);
       font-size: 34px;
       line-height: 1.3;
       letter-spacing: -.01em;
+      overflow-wrap: anywhere; /* 长词自动折行，窄屏不撑破容器（PRD.md §7 第 10、11 项） */
     }
 
     .sub {
@@ -62,40 +84,126 @@
       font-size: 16px;
     }
 
-    .card {
+    /* ---------- 已收录条数 + 最近更新日期 ---------- */
+    /* 与标题块隔 32px、与下方列表只隔 16px —— 靠「贴住列表」表达它属于列表 */
+    .count {
+      margin: 0 0 var(--sp-4);
+      color: var(--text-soft);
+      font-size: 14px;
+    }
+
+    .count strong {
+      color: var(--accent-text);
+      font-size: 18px;
+    }
+
+    /* ---------- 概念卡片列表 ---------- */
+    .item {
+      display: block;
+      text-decoration: none;
+      color: inherit;
       background: var(--card);
       border: 1px solid var(--line);
       border-radius: var(--radius);
-      padding: 26px 28px;
-      margin-bottom: 18px;
+      padding: var(--sp-5) var(--sp-6);
+      margin-bottom: var(--sp-4);
+      transition: border-color .15s ease, box-shadow .15s ease;
     }
 
-    .card h2 {
-      margin: 0 0 6px;
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--accent);
-      letter-spacing: .04em;
-      text-transform: uppercase;
+    .item:hover {
+      border-color: var(--accent);
+      box-shadow: 0 2px 10px rgba(47, 111, 237, .08);
     }
 
-    .card p { margin: 8px 0 0; color: var(--text-soft); }
-    .card p.strong { color: var(--text); font-weight: 600; }
+    /* 键盘按 Tab 走到卡片时给一个明显的焦点环。
+       :focus-visible 只在键盘操作时出现，鼠标点击不会留框，不碍眼。 */
+    .item:focus-visible {
+      outline: 3px solid var(--accent-text);
+      outline-offset: 2px;
+    }
 
-    ul { margin: 12px 0 0; padding-left: 20px; color: var(--text-soft); }
-    li { margin-bottom: 6px; }
-
-    .status {
+    .item-meta {
       display: flex;
-      gap: 10px;
-      align-items: flex-start;
-      padding: 14px 16px;
-      border-radius: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: var(--sp-3);
+      font-size: 13px;
+      color: var(--text-soft);
+    }
+
+    .item-title {
+      margin: var(--sp-2) 0;
+      font-size: 19px;
+      font-weight: 600;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .item-title .en {
+      margin-left: var(--sp-2);
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--text-soft);
+    }
+
+    .item-def {
+      margin: 0;
+      font-size: 15px;
+      color: var(--text-soft);
+    }
+
+    /* 未写完的记录仍可见，但会带上这个标记，且不计入「已更新」条数（PRD.md §7 第 4 项） */
+    .tag-todo {
+      display: inline-block;
+      padding: 1px var(--sp-2);
+      border-radius: 999px;
       background: #fff8e6;
       border: 1px solid #f5e0a8;
       color: #7a5a12;
-      font-size: 14px;
-      margin-top: 14px;
+      font-size: 12px;
+    }
+
+    /* ---------- 状态提示卡片：加载中 / 空 / 错误（PRD.md §7） ---------- */
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--sp-6);
+    }
+
+    .panel-title {
+      margin: 0 0 var(--sp-2);
+      font-size: 19px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .panel-desc {
+      margin: 0;
+      color: var(--text-soft);
+      font-size: 15px;
+    }
+
+    /* 「加载中」用的居中面板 + 转圈指示器 */
+    .panel-center { text-align: center; }
+
+    .panel-center .panel-desc { margin-top: var(--sp-2); }
+
+    .spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--accent-soft);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 系统开了「减少动态效果」时不转圈，避免不适（无障碍） */
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; }
     }
 
     code {
@@ -106,61 +214,251 @@
       font-size: 13px;
       font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
       color: #2b3440;
+      overflow-wrap: anywhere;
     }
 
     footer {
-      margin-top: 44px;
-      padding-top: 20px;
+      margin-top: var(--sp-8);
+      padding-top: var(--sp-5);
       border-top: 1px solid var(--line);
       color: var(--text-soft);
       font-size: 13px;
       display: flex;
       justify-content: space-between;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: var(--sp-2);
+    }
+
+    /* ---------- 窄屏（≤480px）：收窄横向内边距 ----------
+       原来单侧横向内边距 20px(容器) + 24px(卡片) = 44px，在 375px 屏幕上要吃掉约 23%，
+       `.panel` 更是 50px，正文只剩约 275px，读起来偏挤。这里按 PRD.md §5.6
+       「不做独立移动端布局，但正文不需缩放可读」收窄内边距，不改信息层级。 */
+    @media (max-width: 480px) {
+      .wrap { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+      h1 { font-size: 28px; }
+      .item { padding: var(--sp-4); }
+      .panel { padding: var(--sp-5); }
     }
   </style>
 </head>
 <body>
+  <!-- PRD.md §7 第 5 项：浏览器禁用脚本时，显示一段能读的静态说明，不白屏 -->
+  <noscript>
+    <div class="wrap">
+      <div class="panel">
+        <h2 class="panel-title">这个网站需要开启 JavaScript 才能显示内容</h2>
+        <p class="panel-desc">
+          本站的概念内容存在数据文件里，由浏览器读取后显示。<br />
+          请开启浏览器的 JavaScript 后刷新页面；或者直接双击本目录下的 <code>index.html</code> 打开。
+        </p>
+      </div>
+    </div>
+  </noscript>
+
   <div class="wrap">
     <header>
-      <span class="badge">Day 2 · 占位页</span>
       <h1>每日一个 AI 概念详解</h1>
       <p class="sub">用简单易懂的方式，每天讲清一个 AI 核心概念。</p>
     </header>
 
-    <div class="card">
-      <h2>这个网站要做什么</h2>
-      <p class="strong">每天 1 个概念，讲明白「它是什么、为什么重要、什么时候用得上」。</p>
-      <ul>
-        <li>面向非算法背景的读者，不堆公式</li>
-        <li>每个概念配一个生活化类比</li>
-        <li>读完 3 分钟，能向别人复述</li>
-      </ul>
-    </div>
+    <!-- aria-live：状态变化时让屏幕阅读器念出这句摘要，不必靠眼睛盯着页面 -->
+    <p class="count" id="count" aria-live="polite">正在加载…</p>
 
-    <div class="card">
-      <h2>当前进度</h2>
-      <p>本页是第 2 天的<strong>占位页</strong>，只用来验证网站能从 GitHub Pages / 本地正常打开。</p>
-      <div class="status">
-        <span>🚧</span>
-        <span>
-          网站功能开发将在 <strong>Day 7</strong> 开始（MVP）。
-          今天只需保证仓库、首页文件、忽略规则三件事到位。
-        </span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>怎么本地打开</h2>
-      <p>直接双击 <code>index.html</code>，或在项目目录执行：</p>
-      <p><code>start index.html</code>　（Windows）</p>
-    </div>
+    <!--
+      概念卡片由下方脚本从这里注入；页面里不写死任何一条概念的内容（PRD.md §6.2）。
+      data-state 会随当前状态变化，取值：loading / success / empty / error。
+      在浏览器里按 F12，选中这个元素就能看到它现在是哪个状态。
+    -->
+    <main class="list" id="list" data-state="loading"></main>
 
     <footer>
       <span>每日一个 AI 概念详解</span>
-      <span>Day 2｜仓库初始化</span>
+      <span>Day 8｜首页主视图（mock 数据版）</span>
     </footer>
   </div>
+
+  <!-- 数据文件：首页只从这里读数据 -->
+  <script src="concepts.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      /* ==========================================================================
+       * 首页主视图渲染脚本
+       * --------------------------------------------------------------------------
+       * 职责：从数据文件取概念 → 渲染成卡片列表。
+       * 页面里不写死任何一条概念的内容（PRD.md §6.2）。
+       *
+       * 四种状态（本次要求，其中 3 项对应 PRD.md §7）
+       *   loading  加载中  ← 正在读取数据
+       *   success  成功    ← 列表渲染完成
+       *   empty    空      ← 一条内容都没有（PRD.md §7 第 3 项）
+       *   error    错误    ← 数据文件没加载成功（PRD.md §7 第 5 项）
+       *
+       * 当前状态写在 <main id="list"> 的 data-state 属性上，方便核对。
+       *
+       * 调试开关（只为验收用，不带参数时完全不影响正常流程）
+       *   在地址后加 ?state=empty  强制进入空状态
+       *   在地址后加 ?state=error  强制进入错误态
+       *   例：http://127.0.0.1:8000/?state=empty
+       * ========================================================================== */
+
+      var listEl  = document.getElementById('list');
+      var countEl = document.getElementById('count');
+
+      /* ---------- 工具：把文本里的 < > & " 转成安全字符 ----------
+         概念内容里如果出现这些符号，不加这一层会把页面结构弄坏。 */
+      function esc(s) {
+        return String(s === null || s === undefined ? '' : s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      /* ---------- 工具：统一的提示卡片 ----------
+         文案一律说人话（PRD.md §7 统一处理原则）。
+         role="status" 让屏幕阅读器在提示出现时念出来，不用眼睛盯屏幕。 */
+      function panel(title, desc) {
+        return '<div class="panel" role="status">'
+             +   '<h2 class="panel-title">' + esc(title) + '</h2>'
+             +   '<p class="panel-desc">' + desc + '</p>'
+             + '</div>';
+      }
+
+      /* ---------- 工具：记录当前状态 ---------- */
+      function setState(state) {
+        listEl.setAttribute('data-state', state);
+      }
+
+      /* ---------- 调试开关：从地址栏读 ?state=empty / ?state=error ----------
+         只在验收时用来强制进入空态、错误态；正常运行不会带这个参数。 */
+      var forced = '';
+      try {
+        var search = (typeof window !== 'undefined' && window.location) ? String(window.location.search) : '';
+        var hit = search.match(/(?:^|[?&])state=(empty|error)(?![a-z])/);
+        if (hit) forced = hit[1];
+      } catch (e) {
+        forced = '';
+      }
+
+      /* ==========================================================================
+       * 状态 1 / 4：加载中
+       * ========================================================================== */
+      function renderLoading() {
+        setState('loading');
+        countEl.textContent = '';
+        listEl.innerHTML = '<div class="panel panel-center" role="status">'
+                         +   '<span class="spinner" aria-hidden="true"></span>'
+                         +   '<p class="panel-desc">正在加载内容…</p>'
+                         + '</div>';
+      }
+
+      /* ==========================================================================
+       * 状态 2 / 4：成功 —— 计数行 + 概念卡片列表
+       * PRD.md §3 F1：每条显示 日期 · 中文名 · 英文名 · 一句话定义
+       * ========================================================================== */
+      function renderSuccess(list) {
+        setState('success');
+
+        /* 已收录条数 = 只统计「写完了」的记录（PRD.md §6.1） */
+        var completeCount = 0;
+        for (var i = 0; i < list.length; i++) {
+          if (isConceptComplete(list[i])) completeCount++;
+        }
+        var todoCount = list.length - completeCount;
+
+        var countText = '已更新 <strong>' + completeCount + '</strong> 个概念';
+        if (todoCount > 0) {
+          countText += '（另有 ' + todoCount + ' 条待补充，未计入）';
+        }
+
+        /* 最近更新日期：列表已按日期倒序，取第一条有日期的记录即可 */
+        var latest = '';
+        for (var k = 0; k < list.length; k++) {
+          if (list[k].date) { latest = list[k].date; break; }
+        }
+        if (latest) countText += ' · 最近更新 ' + esc(latest);
+
+        countEl.innerHTML = countText;
+
+        /* 渲染概念卡片 */
+        var html = '';
+        for (var j = 0; j < list.length; j++) {
+          var c = list[j];
+
+          html += '<a class="item" href="concept.html?id=' + encodeURIComponent(c.slug) + '">';
+          html += '  <div class="item-meta">';
+          html += '    <span>' + esc(c.date || '日期待补充') + '</span>';
+          if (!isConceptComplete(c)) html += '    <span class="tag-todo">待补充</span>';
+          html += '  </div>';
+          html += '  <h2 class="item-title">' + esc(c.titleZh)
+                +   '<span class="en">' + esc(c.titleEn) + '</span></h2>';
+          html += '  <p class="item-def">' + esc(c.definition) + '</p>';
+          html += '</a>';
+        }
+        listEl.innerHTML = html;
+      }
+
+      /* ==========================================================================
+       * 状态 3 / 4：空 —— 数据文件里一条记录都没有（PRD.md §7 第 3 项）
+       * ========================================================================== */
+      function renderEmpty() {
+        setState('empty');
+        countEl.textContent = '已更新 0 个概念';
+        listEl.innerHTML = panel(
+          '内容准备中',
+          '还没有写入任何概念。往 <code>concepts.js</code> 里加一条，刷新后它会自动出现在这里。'
+        );
+      }
+
+      /* ==========================================================================
+       * 状态 4 / 4：错误 —— 数据文件没加载成功（PRD.md §7 第 5 项）
+       * 用 typeof 判断是安全的：即使取数函数根本不存在，也不会抛错。
+       * ========================================================================== */
+      function renderError() {
+        setState('error');
+        countEl.textContent = '';
+        listEl.innerHTML = panel(
+          '内容没能加载出来',
+          '数据文件可能没和页面放在同一个文件夹里。请确认 <code>concepts.js</code> 与 <code>index.html</code> '
+          + '在同一目录下，然后刷新页面再试。'
+        );
+      }
+
+      /* ==========================================================================
+       * 主流程：先进入「加载中」，取数回来后再切到另外三种状态之一
+       * --------------------------------------------------------------------------
+       * 取数走 fetchConceptList()（mock 异步，见 concepts.js 第三节）。
+       * 因为它是异步的，浏览器会先把「加载中」真正画到屏幕上，
+       * 约 350ms 后数据回来，再换成概念列表。
+       * 将来换成真实接口，这一段一行都不用改。
+       * ========================================================================== */
+      renderLoading();
+
+      /* 异常：数据文件没加载成功 —— 连取数函数都不存在（PRD.md §7 第 5 项） */
+      if (typeof fetchConceptList !== 'function') {
+        renderError();
+        return;
+      }
+
+      /* 异步取数：等待期间页面停在「加载中」 */
+      fetchConceptList(function (list) {
+
+        /* 调试开关优先：让空态、错误态也能被肉眼验收 */
+        if (forced === 'error') { renderError(); return; }
+        if (forced === 'empty') { renderEmpty(); return; }
+
+        /* 异常：一条内容都没有（PRD.md §7 第 3 项） */
+        if (!list || list.length === 0) {
+          renderEmpty();
+          return;
+        }
+
+        /* 正常 */
+        renderSuccess(list);
+      });
+    })();
+  </script>
 </body>
 </html>

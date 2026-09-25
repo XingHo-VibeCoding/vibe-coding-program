@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>每日一个 AI 概念详解</title>
+  <meta name="description" content="用简单易懂的方式，每天讲解一个 AI 核心概念。" />
+  <style>
+    /* 设计变量沿用 Day 2 占位页的口径，与首页保持一致（PRD.md §5.5）。Day 9 增量与首页同步：
+       ① 新增 --accent-text：与 --accent 同色系、深一档，专供「小字号强调文字」；
+          原来直接用 --accent 写 13～14px 的文字时，在浅灰底上只有 4.24:1，低于 AA 的 4.5:1。
+       ② 新增间距刻度：4px 基数，全站间距只从这里取值。
+       ③ 容器上内边距由 48px 改为与首页一致的 56px —— 之前从首页点进详情页时，首屏会向上跳 8px。 */
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1a1d21;
+      --text-soft: #5b6472;
+      --line: #e4e7ec;
+      --accent: #2f6fed;        /* 只用于色块 / 边框 / 按钮底，不用于小字号文字 */
+      --accent-text: #2560d8;   /* 小字号强调文字专用：浅灰底 5.23:1，白卡 5.61:1 */
+      --accent-soft: #eaf0fe;
+      --radius: 14px;
+
+      /* 间距刻度：4px 基数 */
+      --sp-1: 4px;
+      --sp-2: 8px;
+      --sp-3: 12px;
+      --sp-4: 16px;
+      --sp-5: 20px;
+      --sp-6: 24px;
+      --sp-7: 32px;
+      --sp-8: 40px;
+      --sp-9: 56px;
+      --sp-10: 80px;
+    }
+
+    * { box-sizing: border-box; }
+
+    /* hidden 属性要能盖住下面的 flex 布局，否则隐藏不生效 */
+    [hidden] { display: none !important; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: var(--sp-9) var(--sp-5) var(--sp-10);
+    }
+
+    /* ---------- 区块 1：页头（日期 + 编号 + 中文名 + 英文名） ---------- */
+    .head {
+      margin-bottom: var(--sp-7);
+      padding-bottom: var(--sp-5);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .head-meta {
+      font-size: 13px;
+      color: var(--text-soft);
+      letter-spacing: .02em;
+    }
+
+    .head-title {
+      margin: var(--sp-3) 0 var(--sp-1);
+      font-size: 30px;
+      line-height: 1.3;
+      letter-spacing: -.01em;
+      overflow-wrap: anywhere; /* 长词自动折行，窄屏不撑破容器（PRD.md §7 第 10、11 项） */
+    }
+
+    .head-en {
+      font-size: 15px;
+      color: var(--text-soft);
+      overflow-wrap: anywhere;
+    }
+
+    /* ---------- 区块 2～7：固定 6 段，段落标题样式统一 ---------- */
+    .sec { margin-bottom: var(--sp-7); }
+
+    .sec-title {
+      margin: 0 0 var(--sp-2);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent-text);
+      letter-spacing: .04em;
+    }
+
+    .sec-body p { margin: 0; }
+    .sec-body p + p { margin-top: var(--sp-2); }
+
+    /* 第 1 段「一句话定义」：整页最重要的一句，字号稍大 */
+    .lead { font-size: 17px; }
+
+    /* 第 2 段「生活化类比」：全站的核心差异点，用浅底 + 左侧色条单独突出 */
+    .analogy {
+      background: var(--accent-soft);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 8px 8px 0;
+      padding: var(--sp-3) var(--sp-4);
+    }
+
+    .sec-body ul {
+      margin: 0;
+      padding-left: var(--sp-5);
+    }
+
+    .sec-body li { margin-bottom: var(--sp-2); }
+
+    /* 必填字段缺失时的占位（PRD.md §7 第 4 项） */
+    .pending {
+      color: var(--text-soft);
+      font-style: italic;
+    }
+
+    /* 第 5 段「费曼提问」：题目直接可见，自查要点默认收起 */
+    .quiz { margin-bottom: var(--sp-4); }
+    .quiz:last-child { margin-bottom: 0; }
+
+    .quiz-q {
+      margin: 0;
+      font-weight: 600;
+    }
+
+    .quiz-toggle {
+      margin-top: var(--sp-2);
+      padding: var(--sp-2) var(--sp-4);
+      border: 1px solid var(--accent-text);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--accent-text);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s ease, color .15s ease, border-color .15s ease;
+    }
+
+    .quiz-toggle:hover { background: var(--accent-soft); }
+
+    /* 展开态：按钮填实。原来展开前后按钮外观完全一样，看不出当前是展开还是收起 */
+    .quiz-toggle[aria-expanded="true"] {
+      background: var(--accent-text);
+      border-color: var(--accent-text);
+      color: #ffffff;
+    }
+
+    .quiz-toggle[aria-expanded="true"]:hover { background: #1d4fbf; }
+
+    /* 键盘 Tab 走到按钮 / 链接时给出可见焦点环（首页的卡片已有，详情页这轮补齐） */
+    .quiz-toggle:focus-visible,
+    .btn:focus-visible,
+    .back:focus-visible,
+    .nav-link:focus-visible,
+    .panel-list a:focus-visible,
+    .sources a:focus-visible {
+      outline: 3px solid var(--accent-text);
+      outline-offset: 2px;
+    }
+
+    .quiz-points {
+      margin: var(--sp-3) 0 0;
+      padding-left: var(--sp-5);
+    }
+
+    /* 第 6 段「来源」 */
+    .sources a {
+      color: var(--accent-text);
+      word-break: break-all; /* 长链接自动换行，不撑破容器（PRD.md §7 第 11 项） */
+    }
+
+    /* ---------- 异常状态画面（PRD.md §7） ---------- */
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--sp-6);
+    }
+
+    .panel-title {
+      margin: 0 0 var(--sp-2);
+      font-size: 19px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .panel-desc {
+      margin: 0;
+      color: var(--text-soft);
+      font-size: 15px;
+    }
+
+    .panel-note {
+      margin: var(--sp-6) 0 var(--sp-2);
+      font-size: 14px;
+      color: var(--text-soft);
+    }
+
+    .panel-list {
+      margin: 0;
+      padding-left: var(--sp-5);
+    }
+
+    .panel-list li { margin-bottom: var(--sp-1); }
+    .panel-list a { color: var(--accent-text); }
+
+    /* 异常提示里的「返回首页」出口 —— 每一条异常都必须带一个（PRD.md §7 统一处理原则） */
+    .btn {
+      display: inline-block;
+      margin-top: var(--sp-4);
+      padding: var(--sp-2) var(--sp-5);
+      border-radius: 999px;
+      background: var(--accent);
+      color: #ffffff;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    /* hover 原来是 opacity: .88，会把白字对蓝底的对比度从 4.55:1 拉到约 3.79:1；
+       改成加深底色，hover 时对比度反而升到 5.61:1。 */
+    .btn:hover { background: var(--accent-text); }
+
+    code {
+      background: #f1f3f6;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      color: #2b3440;
+      overflow-wrap: anywhere;
+    }
+
+    /* ---------- 区块 8：导航 ---------- */
+    .nav {
+      margin-top: var(--sp-7);
+      padding-top: var(--sp-5);
+      border-top: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: var(--sp-4);
+    }
+
+    .back {
+      align-self: flex-start;
+      color: var(--accent-text);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .back:hover { text-decoration: underline; }
+
+    .adjacent {
+      display: flex;
+      gap: var(--sp-3);
+      justify-content: space-between;
+    }
+
+    .nav-link {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-1);
+      padding: var(--sp-3) var(--sp-4);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .nav-link:hover { border-color: var(--accent); }
+
+    .nav-label {
+      font-size: 12px;
+      color: var(--text-soft);
+    }
+
+    .nav-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent-text);
+      overflow-wrap: anywhere;
+    }
+
+    /* 首篇的「上一篇」、末篇的「下一篇」：置灰不可点，不跳转、不报错（PRD.md §7 第 6 项）
+       Day 9 说明：这里的 opacity:.5 已识别为「文字偏灰」，但 PRD §7 第 6 项
+       明确要求「按钮置灰」，且 WCAG 对「非活动控件」的对比度有豁免，
+       故本轮**刻意不改**，以免为了对比度违背 PRD 的字面要求。 */
+    .nav-link.is-disabled {
+      background: transparent;
+      border-style: dashed;
+      opacity: .5;
+      cursor: not-allowed;
+    }
+
+    .nav-note {
+      font-size: 13px;
+      color: var(--text-soft);
+    }
+
+    footer {
+      margin-top: var(--sp-7);
+      color: var(--text-soft);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: var(--sp-2);
+    }
+
+    /* ---------- 窄屏（≤480px） ----------
+       原来单侧横向内边距 20px(容器) + 24px(卡片) = 44px，375px 屏上要吃掉约 23%；
+       `.panel` 更是 50px，异常提示正文只剩约 275px。
+       另外「上一篇 / 下一篇」是固定双列，375px 下每列只剩约 155px，
+       标题会被挤成三四行、两列高度不齐 —— 窄屏改为上下单列。
+       ⚠️ 必须同时把 flex 基准改回 auto：纵向容器里 flex-basis:0 会让卡片高度塌成 0。 */
+    @media (max-width: 480px) {
+      .wrap { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+      .head-title { font-size: 26px; }
+      .panel { padding: var(--sp-5); }
+      .adjacent { flex-direction: column; }
+      .nav-link { flex: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- PRD.md §7 第 5 项：浏览器禁用脚本时，显示一段能读的静态说明，不白屏 -->
+  <noscript>
+    <div class="wrap">
+      <div class="panel">
+        <h2 class="panel-title">这个网站需要开启 JavaScript 才能显示内容</h2>
+        <p class="panel-desc">
+          本站的概念内容存在数据文件里，由浏览器读取后显示。<br />
+          请开启浏览器的 JavaScript 后刷新页面；或者回到 <code>index.html</code> 从首页进入。
+        </p>
+        <a class="btn" href="index.html">返回首页</a>
+      </div>
+    </div>
+  </noscript>
+
+  <div class="wrap">
+    <!-- 区块 1：页头，由脚本按地址栏里的 ?id= 渲染 -->
+    <header class="head" id="head"></header>
+
+    <!-- 区块 2～7：固定 6 段，由脚本按地址栏里的 ?id= 渲染 -->
+    <main id="body"></main>
+
+    <!-- 区块 8：导航 -->
+    <nav class="nav" id="nav">
+      <a class="back" href="index.html">← 返回首页</a>
+      <div class="adjacent" id="adjacent-nav"></div>
+    </nav>
+
+    <footer>
+      <span>每日一个 AI 概念详解</span>
+      <span>Day 7｜MVP 骨架</span>
+    </footer>
+  </div>
+
+  <!-- 数据文件：详情页只从这里读数据 -->
+  <script src="concepts.js"></script>
+  <script>
+    (function () {
+      /* ---------------- 一、小工具 ---------------- */
+
+      /* 把文本里的 < > & " 转成安全字符，避免内容里的这些符号弄坏页面结构 */
+      function esc(s) {
+        return String(s === null || s === undefined ? '' : s)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      /* 取出一个字段的文本；空值统一返回空字符串，便于后面判断「缺不缺」 */
+      function textOf(v) {
+        if (v === null || v === undefined) return '';
+        return String(v).trim();
+      }
+
+      /* 从数组里挑出所有非空的文本 */
+      function keepTexts(arr) {
+        var out = [];
+        if (!Array.isArray(arr)) return out;
+        for (var i = 0; i < arr.length; i++) {
+          var t = textOf(arr[i]);
+          if (t) out.push(t);
+        }
+        return out;
+      }
+
+      /* 异常 / 空状态提示卡片。文案一律说人话，不出现技术错误信息（PRD.md §7 统一处理原则） */
+      function panel(title, desc, extraHtml) {
+        return '<div class="panel">'
+             +   '<h2 class="panel-title">' + esc(title) + '</h2>'
+             +   '<p class="panel-desc">' + desc + '</p>'
+             +   (extraHtml || '')
+             + '</div>';
+      }
+
+      /* 生成一个固定段落块。段落标题写死，内容来自数据 —— 6 段的顺序由这里保证 */
+      function section(title, innerHtml) {
+        return '<section class="sec">'
+             +   '<h2 class="sec-title">' + esc(title) + '</h2>'
+             +   '<div class="sec-body">' + innerHtml + '</div>'
+             + '</section>';
+      }
+
+      /* 把一个数组渲染成 <ul>；attrs 用来追加 class / hidden 之类的属性 */
+      function toList(items, attrs) {
+        var out = '';
+        for (var i = 0; i < items.length; i++) {
+          out += '<li>' + esc(items[i]) + '</li>';
+        }
+        return '<ul' + (attrs ? ' ' + attrs : '') + '>' + out + '</ul>';
+      }
+
+      /* 一段正文；内容缺失时显示占位而不是留白（PRD.md §7 第 4 项） */
+      function para(v, cls) {
+        var t = textOf(v);
+        if (!t) return '<p class="pending">这一段待补充</p>';
+        return '<p' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(t) + '</p>';
+      }
+
+      /* 一个字符串列表段落；内容缺失时同样显示占位 */
+      function listBlock(items) {
+        var texts = keepTexts(items);
+        if (texts.length === 0) return '<p class="pending">这一段待补充</p>';
+        return toList(texts);
+      }
+
+      /* 费曼提问段落：题干可见，自查要点默认收起 */
+      function quizBlock(quizzes) {
+        if (!Array.isArray(quizzes)) return '<p class="pending">这一段待补充</p>';
+
+        var out = '';
+        for (var i = 0; i < quizzes.length; i++) {
+          var q = quizzes[i] || {};
+          var qText = textOf(q.question);
+          var pts = keepTexts(q.points);
+          if (!qText && pts.length === 0) continue; // 整道都是空的，跳过
+
+          out += '<div class="quiz">';
+          out += qText
+               ? '<p class="quiz-q">' + esc(qText) + '</p>'
+               : '<p class="quiz-q pending">提问待补充</p>';
+
+          if (pts.length === 0) {
+            /* 没有要点就没有可收起的内容，直接显示占位 */
+            out += '<p class="pending">自查要点待补充</p>';
+          } else {
+            out += '<button type="button" class="quiz-toggle" aria-expanded="false">展开自查要点</button>';
+            out += toList(pts, 'class="quiz-points" hidden');
+          }
+          out += '</div>';
+        }
+
+        return out || '<p class="pending">这一段待补充</p>';
+      }
+
+      /* 来源段落 */
+      function sourcesBlock(sources) {
+        if (!Array.isArray(sources)) return '<p class="pending">这一段待补充</p>';
+
+        var out = '';
+        for (var i = 0; i < sources.length; i++) {
+          var s = sources[i] || {};
+          var url = textOf(s.url);
+          if (!url) continue;
+          var label = textOf(s.label) || url;
+          out += '<li><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(label) + '</a></li>';
+        }
+        return out
+             ? '<ul class="sources">' + out + '</ul>'
+             : '<p class="pending">这一段待补充</p>';
+      }
+
+      /* ---------------- 二、拿页面元素 ---------------- */
+
+      var headEl = document.getElementById('head');
+      var bodyEl = document.getElementById('body');
+      var navEl = document.getElementById('nav');
+      var adjEl = document.getElementById('adjacent-nav');
+
+      var BACK_BUTTON = '<a class="btn" href="index.html">返回首页</a>';
+
+      /* 渲染异常画面：清空页头、正文换成提示卡片、底部导航收起（出口已在提示卡片里） */
+      function showState(title, desc, extraHtml) {
+        document.title = title + ' · 每日一个 AI 概念详解';
+        headEl.innerHTML = '';
+        bodyEl.innerHTML = panel(title, desc, BACK_BUTTON + (extraHtml || ''));
+        navEl.hidden = true;
+        adjEl.innerHTML = '';
+      }
+
+      /* 列出目前「已经写好」的概念名字（PRD.md §7 第 2 项要求附上这份名单） */
+      function writtenListHtml() {
+        var list = getConceptList();
+        var out = '';
+        for (var i = 0; i < list.length; i++) {
+          if (!isConceptComplete(list[i])) continue; // 「已收录」只算写完的（PRD.md §6.1）
+          out += '<li><a href="concept.html?id=' + encodeURIComponent(list[i].slug) + '">'
+               + esc(textOf(list[i].titleZh) || list[i].slug) + '</a></li>';
+        }
+        if (!out) return '<p class="panel-note">目前还没有写完的概念。</p>';
+        return '<p class="panel-note">目前已经写好的概念：</p><ul class="panel-list">' + out + '</ul>';
+      }
+
+      /* ---------------- 三、判断要显示什么 ---------------- */
+
+      /* 异常 1：数据文件没加载成功（PRD.md §7 第 5 项）
+         用 typeof 判断是安全的：即使函数根本不存在，也不会抛错。 */
+      if (typeof getConceptBySlug !== 'function' || typeof getConceptList !== 'function') {
+        showState(
+          '内容没能加载出来',
+          '数据文件可能没和页面放在同一个文件夹里。请确认 <code>concepts.js</code> 与 <code>concept.html</code> '
+          + '在同一目录下，然后刷新页面再试。'
+        );
+        return;
+      }
+
+      /* 取地址栏里的 ?id= */
+      var slug = new URLSearchParams(window.location.search).get('id');
+
+      /* 异常 2：没带概念编号（PRD.md §7 第 1 项） */
+      if (!textOf(slug)) {
+        showState(
+          '没有指定要看哪个概念',
+          '这个页面需要从首页点进来。请回到首页，在列表里选一条。'
+        );
+        return;
+      }
+
+      /* 异常 3：地址里的编号在数据里找不到（PRD.md §7 第 2 项） */
+      var c = getConceptBySlug(slug);
+      if (!c) {
+        showState(
+          '这个概念还没写',
+          '地址里的编号在已有内容里找不到。下面是目前已经写好的概念，点一个继续读。',
+          writtenListHtml()
+        );
+        return;
+      }
+
+      /* ---------------- 四、正常渲染 ---------------- */
+
+      document.title = (textOf(c.titleZh) || '概念详解') + ' · 每日一个 AI 概念详解';
+
+      /* 区块 1：页头 —— 日期 + 编号 + 中文名 + 英文名（PRD.md §5.3 第 1 项） */
+      var metaDate = textOf(c.date) || '日期待补充';
+      var metaNo = typeof c.serialNo === 'number' ? '编号 ' + c.serialNo : '编号待补充';
+
+      headEl.innerHTML =
+          '<div class="head-meta">' + esc(metaDate) + ' · ' + esc(metaNo) + '</div>'
+        + '<h1 class="head-title">' + esc(textOf(c.titleZh) || '标题待补充') + '</h1>'
+        + '<div class="head-en">' + esc(textOf(c.titleEn) || '英文名待补充') + '</div>';
+
+      var html = '';
+
+      /* 区块 2：一句话定义 */
+      html += section('一句话定义', para(c.definition, 'lead'));
+
+      /* 区块 3：生活化类比 */
+      html += section('生活化类比', para(c.analogy, 'analogy'));
+
+      /* 区块 4：为什么重要 */
+      html += section('为什么重要', para(c.whyMatters));
+
+      /* 区块 5：什么时候用得上 */
+      html += section('什么时候用得上', listBlock(c.useCases));
+
+      /* 区块 6：费曼提问 */
+      html += section('费曼提问', quizBlock(c.quiz));
+
+      /* 区块 7：来源 */
+      html += section('来源', sourcesBlock(c.sources));
+
+      bodyEl.innerHTML = html;
+
+      /* ---------------- 五、区块 8：导航 ---------------- */
+
+      /* 「上一篇 / 下一篇」从已经取到的数据里本地算，不新增请求。
+         列表是「日期倒序」，所以下标更大的那条发布得更早。 */
+      function renderAdjacent(current) {
+        var list = getConceptList();
+        var idx = -1;
+        for (var i = 0; i < list.length; i++) {
+          if (String(list[i].slug) === String(current.slug)) { idx = i; break; }
+        }
+        if (idx === -1) { adjEl.innerHTML = ''; return; }
+
+        var older = idx + 1 < list.length ? list[idx + 1] : null; // 上一篇：更早发布的
+        var newer = idx - 1 >= 0 ? list[idx - 1] : null;          // 下一篇：更晚发布的
+
+        adjEl.innerHTML =
+            navLink(older, '← 上一篇', '这已经是最早的一篇')
+          + navLink(newer, '下一篇 →', '这已经是最新的一篇');
+      }
+
+      function navLink(item, label, emptyNote) {
+        if (!item) {
+          /* 首篇的「上一篇」、末篇的「下一篇」：置灰且不可点（PRD.md §7 第 6 项）
+             这里用 span 而不是 a —— 用 a 的话点下去会跳转，违反「不跳转」的要求。 */
+          return '<span class="nav-link is-disabled" aria-disabled="true">'
+               +   '<span class="nav-label">' + esc(label) + '</span>'
+               +   '<span class="nav-note">' + esc(emptyNote) + '</span>'
+               + '</span>';
+        }
+        return '<a class="nav-link" href="concept.html?id=' + encodeURIComponent(item.slug) + '">'
+             +   '<span class="nav-label">' + esc(label) + '</span>'
+             +   '<span class="nav-title">' + esc(textOf(item.titleZh) || item.slug) + '</span>'
+             + '</a>';
+      }
+
+      renderAdjacent(c);
+
+      /* ---------------- 六、自查要点的展开 / 收起 ---------------- */
+
+      /* 只在内存里切换显示状态，不写任何浏览器存储（PRD.md §5.4）；
+         要点初始带 hidden 属性，所以刷新页面必定回到收起状态。 */
+      bodyEl.addEventListener('click', function (e) {
+        var btn = e.target && e.target.closest ? e.target.closest('.quiz-toggle') : null;
+        if (!btn) return;
+
+        var points = btn.parentNode.querySelector('.quiz-points');
+        if (!points) return;
+
+        if (points.hasAttribute('hidden')) {
+          points.removeAttribute('hidden');
+          btn.setAttribute('aria-expanded', 'true');
+          btn.textContent = '收起自查要点';
+        } else {
+          points.setAttribute('hidden', '');
+          btn.setAttribute('aria-expanded', 'false');
+          btn.textContent = '展开自查要点';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
