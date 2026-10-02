@@ -1,0 +1,7 @@
+{
+  "name": "api",
+  "version": "1.2.0",
+  "description": "每日一个AI概念 - 阶段1云函数入口（Day 17 读接口走 CloudBase PG 官方 REST API；无第三方依赖）",
+  "main": "index.js",
+  "dependencies": {}
+}
