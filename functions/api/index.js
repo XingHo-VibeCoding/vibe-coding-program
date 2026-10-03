@@ -1,10 +1,11 @@
 // ==========================================================
-// 云函数 api —— 阶段 1 后端唯一入口（TECH_DESIGN 方案 B1：云函数中转）
+// 云函数 api —— 后端唯一入口（TECH_DESIGN 方案 B1：云函数中转）
 //
-// 路由（全部 GET）：
-//   /api/health            -> 健康检查（不连库；保持 Day 15 已验证形状，见 api-contract §4.1）
-//   /api/concepts          -> 首页列表 + 计数（api-contract §4.2）
-//   /api/concepts/{slug}   -> 详情 6 段（api-contract §4.3）
+// 路由：
+//   GET  /api/health            -> 健康检查（不连库；保持 Day 15 已验证形状，见 api-contract §4.1）
+//   GET  /api/concepts          -> 首页列表 + 计数（api-contract §4.2）
+//   GET  /api/concepts/{slug}   -> 详情 6 段（api-contract §4.3）
+//   POST /api/favorites         -> 收藏一个概念（api-contract §4.4；Day 18 新增，本项目唯一写接口）
 //
 // 统一信封见 api-contract.md §2：
 //   成功 { ok: true,  data,    error: null }
@@ -13,10 +14,13 @@
 
 const { listConcepts } = require('./lib/handlers/listConcepts');
 const { getConcept } = require('./lib/handlers/getConcept');
+const { createFavorite } = require('./lib/handlers/createFavorite');
 const { ApiError, toErrorBody } = require('./lib/errors');
 
 // 从 HTTP 触发事件里解析出 { kind, slug }。
 // 触发路径可能是 /api 或 /，事件里的 path 可能带或不带 /api 前缀，两种都兼容。
+// Day 18 起按方法分流：GET 走三个读接口；POST 只放行 /api/favorites；其余方法一律 404 兜底
+// （PATCH / DELETE 留到第 4 周，见 api-contract §4.4「本期不做」）。
 function parseRoute(event) {
   const method = String(
     event.httpMethod || (event.requestContext && event.requestContext.httpMethod) || 'GET'
@@ -25,19 +29,43 @@ function parseRoute(event) {
   const segs = rawPath.toLowerCase().replace(/\/+$/, '').split('/').filter(Boolean);
   const base = segs[0] === 'api' ? segs.slice(1) : segs;
 
-  if (method !== 'GET') return { kind: 'not_found', method, rawPath };
-  if (base.length === 1 && base[0] === 'health') return { kind: 'health', method, rawPath };
-  if (base.length === 1 && base[0] === 'concepts') return { kind: 'list', method, rawPath };
-  if (base.length === 2 && base[0] === 'concepts') {
-    return {
-      kind: 'detail',
-      // 归一：转小写 + 去空白（库上有 CHECK slug = lower(slug)，PRD §7 第 12 项）
-      slug: decodeURIComponent(base[1]).trim().toLowerCase(),
-      method,
-      rawPath,
-    };
+  if (method === 'GET') {
+    if (base.length === 1 && base[0] === 'health') return { kind: 'health', method, rawPath };
+    if (base.length === 1 && base[0] === 'concepts') return { kind: 'list', method, rawPath };
+    if (base.length === 2 && base[0] === 'concepts') {
+      return {
+        kind: 'detail',
+        // 归一：转小写 + 去空白（库上有 CHECK slug = lower(slug)，PRD §7 第 12 项）
+        slug: decodeURIComponent(base[1]).trim().toLowerCase(),
+        method,
+        rawPath,
+      };
+    }
+    return { kind: 'not_found', method, rawPath };
   }
+
+  if (method === 'POST') {
+    if (base.length === 1 && base[0] === 'favorites') return { kind: 'createFavorite', method, rawPath };
+    return { kind: 'not_found', method, rawPath };
+  }
+
   return { kind: 'not_found', method, rawPath };
+}
+
+// 解析请求体：HTTP 网关给的 body 通常是 JSON 字符串（必要时 base64 编码）。
+// 解析不出来 = 请求格式不对 → INVALID_FIELD（中文人话），而不是 500。
+function parseBody(event) {
+  let raw = event.body;
+  if (raw === undefined || raw === null || raw === '') return null;
+  if (event.isBase64Encoded) {
+    raw = Buffer.from(String(raw), 'base64').toString('utf8');
+  }
+  if (typeof raw !== 'string') return raw; // 本地测试直接传对象的情况
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new ApiError('INVALID_FIELD', 'body 不是合法 JSON');
+  }
 }
 
 // CloudBase HTTP 函数的标准返回形状：网关按 statusCode/headers/body 组装响应
@@ -56,21 +84,25 @@ exports.main = async function (event = {}) {
 
   try {
     let payload;
+    let status = 200;
     if (route.kind === 'health') {
       payload = { ok: true, service: 'ai-concept-daily', time: new Date().toISOString() };
     } else if (route.kind === 'list') {
       payload = await listConcepts();
     } else if (route.kind === 'detail') {
       payload = await getConcept(route.slug);
+    } else if (route.kind === 'createFavorite') {
+      payload = await createFavorite(parseBody(event));
+      status = 201; // 创建成功用 201（api-contract §4.4 约定）
     } else {
       throw new ApiError('NOT_FOUND', `path=${route.rawPath}`);
     }
-    return respond(200, payload);
+    return respond(status, payload);
   } catch (err) {
-    const { status, body } = toErrorBody(err);
+    const { status: errStatus, body } = toErrorBody(err);
     // 技术细节（detail / message）只进日志，不进响应体
     console.error(`[api] kind=${route.kind} code=${body.error.code} detail=${(err && (err.detail || err.message)) || ''}`);
-    return respond(status, body);
+    return respond(errStatus, body);
   } finally {
     console.log(`[api] kind=${route.kind} duration=${Date.now() - startedAt}ms`);
   }

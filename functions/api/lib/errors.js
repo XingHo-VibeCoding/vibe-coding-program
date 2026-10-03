@@ -10,6 +10,12 @@ const TABLE = {
   INTERNAL_ERROR: { status: 500, message: '页面出了点问题，稍后再试' },
   // 未登记路径的兜底（api-contract v0.3 已登记此码；接口正常流程不会触发）
   NOT_FOUND: { status: 404, message: '接口不存在' },
+
+  // ---- Day 18 新增：写接口（POST /api/favorites）专属（api-contract v0.4 §3）----
+  MISSING_FIELD: { status: 400, message: '请指定要收藏的概念' },
+  INVALID_FIELD: { status: 400, message: '收藏的内容格式不对' },
+  FIELD_TOO_LONG: { status: 400, message: '备注最多 200 字' },
+  DUPLICATE_FAVORITE: { status: 409, message: '这个概念你已经收藏过了' },
 };
 
 // 业务错误：code 给前端分支用，detail 只进日志

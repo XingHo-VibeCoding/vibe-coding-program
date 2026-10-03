@@ -59,4 +59,59 @@ async function get(table, query) {
   return res.json();
 }
 
-module.exports = { get, RestError };
+// 向一张表插入一行，返回插入后的行。
+// PostgREST 写法：POST <base>/<table> + Prefer: return=representation（让服务端回吐新行）。
+// 与 get() 共用凭证、超时与错误分类口径。
+// 注意：写权限由 API Key（service_role）决定；若平台对 REST 网关限只读，这里会以 403 抛出
+//      （会归到 PGW_DOWN → 用户看到 DB_UNAVAILABLE），届时需要换方案。
+async function insert(table, row) {
+  const key = getApiKey();
+  const url = `${BASE_URL}/${table}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new RestError('PGW_DOWN', (e && e.message) || '网络请求失败', String((e && e.cause) || ''));
+  }
+
+  // 先取文本再解析：成功和失败都要读 body（失败体里带 PostgreSQL 错误码）
+  const text = await res.text().catch(() => '');
+
+  if (!res.ok) {
+    const detail = `HTTP ${res.status} ${text.slice(0, 200)}`;
+    let pgCode = '';
+    try {
+      pgCode = (JSON.parse(text) || {}).code || '';
+    } catch (e) {
+      /* 非 JSON 错误体，忽略 */
+    }
+    // 23505 = unique_violation：唯一约束冲突。收藏接口靠它识别「重复收藏」，
+    // 由上层 handler 转成业务码 DUPLICATE_FAVORITE（而不是笼统的 500）。
+    if (res.status === 409 || pgCode === '23505') {
+      throw new RestError('PGW_CONFLICT', '唯一约束冲突', detail);
+    }
+    // 401/403（凭证/授权，含"写权限未开放"）/ 5xx → 按"库暂时不可用"处理
+    const code = res.status === 401 || res.status === 403 || res.status >= 500 ? 'PGW_DOWN' : 'PGW_BUG';
+    throw new RestError(code, `PostgREST HTTP ${res.status}`, detail);
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    parsed = null;
+  }
+  return Array.isArray(parsed) ? parsed[0] || {} : parsed || {};
+}
+
+module.exports = { get, insert, RestError };

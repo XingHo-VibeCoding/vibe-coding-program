@@ -1,25 +1,30 @@
 -- ==========================================================================
--- schema.sql —— 每日一个 AI 概念详解网站 · 建表脚本（Day 16）
+-- schema.sql —— 每日一个 AI 概念详解网站 · 建表脚本（Day 16 建，Day 18 加收藏表）
 -- --------------------------------------------------------------------------
 -- 依据：TECH_DESIGN.md §4.2（表设计）、§4.4（索引与排序）
 --       PRD.md §6.1（12 个字段的校验规则 → 落库方式见 TECH_DESIGN §4.5）
 --       api-contract.md §4.2/§4.3（接口形状；date→published_on、
 --       points 嵌套数组→子表，均由云函数做映射）
+--       api-contract.md §4.4（Day 18 收藏接口 → favorites 表）
 --
 -- 可重复执行：先 DROP 再 CREATE（IF EXISTS 保证首次执行也不报错）。
 -- 在 CloudBase PostgreSQL 控制台的 SQL 编辑器里整份粘贴执行即可。
 --
--- 表清单（5 张，无 trends/favorites —— 那是训练营「今日热搜」案例的表）：
+-- 表清单（6 张）：
 --   concepts             概念主表（页头 + 定义 / 类比 / 为什么重要 三段）
 --   concept_use_cases    「什么时候用得上」场景（每概念 1~2 条）
 --   concept_quizzes      「费曼提问」题干（每概念 ≥1 道）
 --   concept_quiz_points  自查要点（挂在提问下，PRD §8.2 要求与提问一一对应）
 --   concept_sources      来源链接（每概念 ≥1 条）
+--   favorites            收藏（Day 18 新增；本项目唯一写接口的落库表）
+--
+-- ⚠️ 没有 trends 表 —— 那是训练营「今日热搜」案例的表；本项目概念标识是 slug。
 -- ==========================================================================
 
 BEGIN;
 
 -- 先删后建：注意顺序，先删子表（其实 CASCADE 已兜底，显式写出更直观）
+DROP TABLE IF EXISTS favorites            CASCADE;
 DROP TABLE IF EXISTS concept_quiz_points CASCADE;
 DROP TABLE IF EXISTS concept_sources      CASCADE;
 DROP TABLE IF EXISTS concept_quizzes      CASCADE;
@@ -96,6 +101,28 @@ CREATE TABLE concept_sources (
     label       text        NOT NULL,                                            -- 链接文字（与 concepts.js 的字段名一致）
     url         text        NOT NULL,
     CONSTRAINT concept_sources_url_ck CHECK (url ~ '^https?://')
+);
+
+-- --------------------------------------------------------------------------
+-- 收藏表：favorites（Day 18 新增，本项目第一个也是唯一的写接口落库表）
+-- --------------------------------------------------------------------------
+-- 为什么用 concept_id 外键而非直接存 slug 文本：
+--   本项目其余 4 张子表一律用 concept_id 外键，保持同一风格；
+--   外键还能保证收藏的一定是真实存在的概念（slug 拼错根本插不进去）。
+-- 防重复怎么实现：UNIQUE(concept_id) —— 一个概念只能收藏一次，
+--   重复提交时数据库直接拒，云函数把唯一冲突转成 DUPLICATE_FAVORITE(409)。
+-- 备注长度为何在表上也挡一次：接口层已校验 ≤200 字，
+--   表上加 CHECK 是"最后一道闸"，任何绕过接口的写入也挡得住（与既有表风格一致）。
+-- 注意：收藏是"人"的行为，本期无登录态 → 不记录用户（PRD §1.4 不做登录）。
+-- --------------------------------------------------------------------------
+CREATE TABLE favorites (
+    id          bigserial   PRIMARY KEY,
+    concept_id  bigint      NOT NULL REFERENCES concepts(id) ON DELETE CASCADE,
+    note        text,                                                              -- 可选备注
+    created_at  timestamptz NOT NULL DEFAULT now(),
+
+    CONSTRAINT favorites_concept_id_key UNIQUE (concept_id),                       -- 防重复的唯一约束
+    CONSTRAINT favorites_note_len_ck    CHECK (note IS NULL OR char_length(note) <= 200)
 );
 
 -- --------------------------------------------------------------------------
