@@ -98,6 +98,16 @@
     }
 
     /* ---------- 概念卡片列表 ---------- */
+    /* 卡片外层（Day 11 新增）：只干一件事 —— 给右上角的收藏按钮一个定位参考框。
+       为什么要多这一层：<a>（整张卡片）里不能再套 <button>。HTML 规定交互元素
+       不能互相嵌套，套了之后键盘 Tab 顺序和读屏软件的行为都会变得古怪。
+       所以把按钮放到 <a> 外面，再用绝对定位压回卡片的右上角。
+       好处是卡片的行数、内边距、行距一个像素都不用改。 */
+    .item-wrap {
+      position: relative;   /* 按钮的定位基准 = 这一层，按钮跑不出卡片范围 */
+      margin-bottom: var(--sp-4);
+    }
+
     .item {
       display: block;
       text-decoration: none;
@@ -106,11 +116,12 @@
       border: 1px solid var(--line);
       border-radius: var(--radius);
       padding: var(--sp-5) var(--sp-6);
-      margin-bottom: var(--sp-4);
       transition: border-color .15s ease, box-shadow .15s ease;
     }
 
-    .item:hover {
+    /* hover 高亮挪到外层：按钮盖在卡片右上角，鼠标停在按钮上时 .item 已经不在
+       指针下方，:hover 不再命中，卡片会「闪一下」掉高亮。挂在外层就没这个问题。 */
+    .item-wrap:hover .item {
       border-color: var(--accent);
       box-shadow: 0 2px 10px rgba(47, 111, 237, .08);
     }
@@ -129,6 +140,9 @@
       gap: var(--sp-3);
       font-size: 13px;
       color: var(--text-soft);
+      /* 给右上角的收藏按钮让位，避免日期文字钻到按钮底下。
+         96px = 按钮最宽时（「★ 已收藏」）的宽度 + 一点余量。 */
+      padding-right: 96px;
     }
 
     .item-title {
@@ -161,6 +175,131 @@
       border: 1px solid #f5e0a8;
       color: #7a5a12;
       font-size: 12px;
+    }
+
+    /* ---------- 卡片收藏按钮（Day 11 新增） ----------
+       三个状态全部由 data-fav-state 这一个属性驱动，样式都挂在它下面：
+         off      未收藏 → 空心星 + 灰字 + 描边
+         on       已收藏 → 实心星 + 蓝底白字
+         pending  处理中 → 转圈 + 按钮禁用
+       好处：文字、图标、颜色、可点性永远同步，不会出现「文字变了样式没变」的中间态。 */
+    .fav-btn {
+      position: absolute;
+      top: var(--sp-5);     /* 与卡片上内边距对齐，视觉上正好落在日期那一行 */
+      right: var(--sp-6);
+      display: inline-flex;
+      align-items: center;
+      gap: var(--sp-1);
+      padding: var(--sp-1) var(--sp-3);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--card);
+      color: var(--text-soft);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.2;
+      cursor: pointer;
+      transition: background .15s ease, color .15s ease, border-color .15s ease;
+    }
+
+    /* hover 改底色，不降低透明度 —— 用 opacity 会把文字对比度一起拉低（Day 9 的教训） */
+    .fav-btn:hover {
+      border-color: var(--accent-text);
+      color: var(--accent-text);
+      background: var(--accent-soft);
+    }
+
+    .fav-btn:focus-visible {
+      outline: 3px solid var(--accent-text);
+      outline-offset: 2px;
+    }
+
+    /* 已收藏：填实。底色用 --accent-text 而不是 --accent ——
+       白字压在 #2f6fed 上只有 4.55:1，压在 #2560d8 上是 5.61:1，13px 小字才稳过 AA。 */
+    .fav-btn[data-fav-state="on"] {
+      background: var(--accent-text);
+      border-color: var(--accent-text);
+      color: #ffffff;
+    }
+
+    .fav-btn[data-fav-state="on"]:hover {
+      background: #1d4fbf;
+      border-color: #1d4fbf;
+    }
+
+    /* 处理中：置灰 + 鼠标变成「等待」图标。
+       这里的 opacity 与详情页 .nav-link.is-disabled 同理 ——
+       WCAG 对「非活动控件」的对比度有豁免，这是刻意为之，不是漏改。 */
+    .fav-btn[data-fav-state="pending"] {
+      cursor: progress;
+      opacity: .7;
+    }
+
+    /* 行内元素不支持 transform，弹跳动画需要它变成 inline-block */
+    .fav-icon {
+      display: inline-block;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    /* 转圈图标：平时不占位，只有处理中才顶掉星星出现 */
+    .fav-spin {
+      display: none;
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--accent-soft);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+
+    .fav-btn[data-fav-state="pending"] .fav-icon { display: none; }
+    .fav-btn[data-fav-state="pending"] .fav-spin { display: inline-block; }
+
+    /* 收藏成功时星星弹一下。动效只是锦上添花：
+       系统开了「减少动态效果」时不播，文字与颜色照样会变。 */
+    .fav-btn.is-pop .fav-icon { animation: fav-pop .3s ease-out; }
+
+    @keyframes fav-pop {
+      0%   { transform: scale(1); }
+      45%  { transform: scale(1.5); }
+      100% { transform: scale(1); }
+    }
+
+    /* ---------- 提示条：收藏失败时出现（Day 11 新增） ----------
+       固定浮在页面底部，不挤动卡片布局。平时隐藏，只在出错时出现。 */
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: var(--sp-7);
+      z-index: 10;
+      max-width: min(92vw, 420px);
+      padding: var(--sp-3) var(--sp-5);
+      border-radius: 12px;
+      background: #22262c;
+      color: #ffffff;
+      font-size: 14px;
+      line-height: 1.5;
+      box-shadow: 0 6px 24px rgba(16, 20, 26, .3);
+      cursor: pointer;
+      /* 收起时用 visibility 而不是 display，opacity 才有过渡可播 */
+      opacity: 0;
+      visibility: hidden;
+      transform: translateX(-50%) translateY(var(--sp-2));
+      transition: opacity .18s ease, transform .18s ease, visibility 0s linear .18s;
+    }
+
+    .toast.is-show {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(0);
+      transition: opacity .18s ease, transform .18s ease, visibility 0s;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .fav-btn.is-pop .fav-icon { animation: none; }
+      .toast { transition: none; }
     }
 
     /* ---------- 状态提示卡片：加载中 / 空 / 错误（PRD.md §7） ---------- */
@@ -238,6 +377,9 @@
       h1 { font-size: 28px; }
       .item { padding: var(--sp-4); }
       .panel { padding: var(--sp-5); }
+      /* 窄屏卡片内边距收到 16px，收藏按钮跟着往里收，保持与日期同一行 */
+      .fav-btn { top: var(--sp-4); right: var(--sp-4); }
+      .toast { bottom: var(--sp-5); }
     }
   </style>
 </head>
@@ -277,6 +419,10 @@
     </footer>
   </div>
 
+  <!-- 收藏失败时的提示条（Day 11）。固定浮在页面底部，不挤动卡片布局；
+       平时隐藏，只有出错时才出现，点一下可以提前收走。 -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
   <!-- 数据文件：首页只从这里读数据 -->
   <script src="concepts.js"></script>
   <script>
@@ -298,9 +444,10 @@
        * 当前状态写在 <main id="list"> 的 data-state 属性上，方便核对。
        *
        * 调试开关（只为验收用，不带参数时完全不影响正常流程）
-       *   在地址后加 ?state=empty  强制进入空状态
-       *   在地址后加 ?state=error  强制进入错误态
-       *   例：http://127.0.0.1:8000/?state=empty
+       *   在地址后加 ?state=loading 停在「加载中」不动（Day 13 新增，为了能把这一态截到图）
+       *   在地址后加 ?state=empty   强制进入空状态
+       *   在地址后加 ?state=error   强制进入错误态
+       *   例：http://127.0.0.1:8000/index.html?state=empty
        * ========================================================================== */
 
       var listEl  = document.getElementById('list');
@@ -331,16 +478,176 @@
         listEl.setAttribute('data-state', state);
       }
 
-      /* ---------- 调试开关：从地址栏读 ?state=empty / ?state=error ----------
-         只在验收时用来强制进入空态、错误态；正常运行不会带这个参数。 */
+      /* ==========================================================================
+       * 收藏交互（Day 11）
+       * --------------------------------------------------------------------------
+       * 今天只做「前端临时状态」：收藏结果存在内存变量里，刷新页面就回到未收藏。
+       * 不写浏览器存储、不发任何网络请求 —— 与 PRD.md §5.7「不写浏览器存储」一致。
+       *
+       * 唯一「假」的地方是 toggleFavoriteMock()（见 concepts.js 第四节）：
+       * 它用 setTimeout 假装「请求在路上」，让「处理中」和「失败」两种状态
+       * 真的能被看到、能被验收。Day 23 接上数据库时把它换成真实请求，
+       * 下面这些逻辑一行都不用改。
+       *
+       * 一张卡片上的按钮有 3 个状态（样式见上方 CSS，全部由 data-fav-state 驱动）：
+       *   off      未收藏  ← 空心星 + 灰字描边
+       *   on       已收藏  ← 实心星 + 蓝底白字，文字变成「已收藏」
+       *   pending  处理中  ← 转圈 + 按钮禁用，此期间再点不会重复提交
+       * ========================================================================== */
+
+      var favState = {};   // slug -> true   已收藏的编号（只存在内存里，刷新即清空）
+      var inFlight = {};   // slug -> true   正在等回包的编号（防重复提交的第二道闸）
+
+      /* 提示条元素与它的收走定时器 */
+      var toastEl = document.getElementById('toast');
+      var toastTimer = null;
+
+      /* ---------- 提示条：说清楚「发生了什么、下一步做什么」 ----------
+         文案一律说人话，不把技术错误信息甩给用户（PRD.md §7 统一处理原则）。
+         role="status" + aria-live="polite"：文字出现时读屏软件会念出来。 */
+      function showToast(message) {
+        if (!toastEl) return;
+
+        toastEl.textContent = message;
+        toastEl.classList.add('is-show');
+
+        /* 连续失败时重置计时，免得上一条还没看完就被收走 */
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(hideToast, 4500);
+      }
+
+      function hideToast() {
+        if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+        if (toastEl) toastEl.classList.remove('is-show');
+      }
+
+      if (toastEl) toastEl.addEventListener('click', hideToast);
+
+      /* ---------- 生成一张卡片的收藏按钮 ----------
+         初始状态直接从 favState 读，所以列表重新渲染后状态不会丢。 */
+      function favButtonHtml(c) {
+        var slug = String(c.slug);
+        var name = c.titleZh || slug;
+        var on = favState[slug] === true;
+
+        return '<button type="button" class="fav-btn"'
+             +   ' data-fav-state="' + (on ? 'on' : 'off') + '"'
+             +   ' data-slug="' + esc(slug) + '"'
+             +   ' data-title="' + esc(name) + '"'
+             +   ' aria-pressed="' + (on ? 'true' : 'false') + '"'
+             +   ' aria-label="' + esc((on ? '已收藏，点击取消：' : '收藏：') + name) + '">'
+             +   '<span class="fav-icon" aria-hidden="true">' + (on ? '★' : '☆') + '</span>'
+             +   '<span class="fav-spin" aria-hidden="true"></span>'
+             +   '<span class="fav-text">' + (on ? '已收藏' : '收藏') + '</span>'
+             + '</button>';
+      }
+
+      /* ---------- 把按钮画成某个状态 ----------
+         这是唯一的「改按钮长相」的出口。只改这一个函数，
+         文字 / 图标 / 颜色 / 可点性 / 读屏文案就一定同步。 */
+      function paintFav(btn, state) {
+        var slug = btn.getAttribute('data-slug') || '';
+        var name = btn.getAttribute('data-title') || '这条概念';
+        var on = favState[slug] === true;   // 以「已确认的状态」为准，不是以本次意图为准
+        var iconEl = btn.querySelector('.fav-icon');
+        var textEl = btn.querySelector('.fav-text');
+
+        btn.setAttribute('data-fav-state', state);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+
+        if (state === 'pending') {
+          /* 处理中：禁用 + aria-busy。disabled 一生效，浏览器就不再派发第二次点击，
+             这是「连续操作不出错」的第一道闸。 */
+          btn.disabled = true;
+          btn.setAttribute('aria-busy', 'true');
+          if (textEl) textEl.textContent = on ? '取消中…' : '收藏中…';
+          btn.setAttribute('aria-label', (on ? '正在取消收藏：' : '正在收藏：') + name);
+        } else {
+          btn.disabled = false;
+          btn.removeAttribute('aria-busy');
+          if (iconEl) iconEl.textContent = on ? '★' : '☆';
+          if (textEl) textEl.textContent = on ? '已收藏' : '收藏';
+          btn.setAttribute('aria-label', (on ? '已收藏，点击取消：' : '收藏：') + name);
+        }
+      }
+
+      /* ---------- 收藏成功时让星星弹一下 ---------- */
+      function popFav(btn) {
+        btn.classList.remove('is-pop');
+        void btn.offsetWidth;   /* 读一次宽度强制浏览器重排，动画才会被重新触发 */
+        btn.classList.add('is-pop');
+      }
+
+      /* ---------- 点一下收藏按钮 ---------- */
+      function onFavClick(btn) {
+        var slug = btn.getAttribute('data-slug') || '';
+        var name = btn.getAttribute('data-title') || '这条概念';
+        if (!slug) return;
+
+        /* 防重复第二道闸：正在等回包就整段忽略。
+           disabled 已经能挡住鼠标和键盘，这一道是兜底 ——
+           万一将来换成别的元素、或者 disabled 被绕过，也不会重复提交。 */
+        if (inFlight[slug]) return;
+
+        /* 数据层没加载成功时，给一句能照做的提示，而不是静默失灵 */
+        if (typeof toggleFavoriteMock !== 'function') {
+          showToast('收藏功能没有加载出来。请确认 concepts.js 与 index.html 在同一个文件夹，'
+                  + '然后刷新页面再试。');
+          return;
+        }
+
+        var willFav = favState[slug] !== true;   // 这次点下去想要的结果
+        inFlight[slug] = true;
+        paintFav(btn, 'pending');
+
+        toggleFavoriteMock(slug, function onDone() {
+          inFlight[slug] = false;
+          favState[slug] = willFav;              // 只有回包成功才落状态
+          paintFav(btn, willFav ? 'on' : 'off');
+          if (willFav) popFav(btn);
+        }, function onError() {
+          inFlight[slug] = false;
+          /* 失败就退回点击前的样子，别让按钮停在一个骗人的状态上 */
+          paintFav(btn, favState[slug] === true ? 'on' : 'off');
+          showToast('没能' + (willFav ? '收藏' : '取消收藏') + '「' + name + '」，请再点一次试试。');
+        });
+      }
+
+      /* ---------- 调试开关 1：从地址栏读 ?state=loading / empty / error ----------
+         只在验收时用来强制进入加载态、空态、错误态；正常运行不会带这个参数。 */
       var forced = '';
       try {
         var search = (typeof window !== 'undefined' && window.location) ? String(window.location.search) : '';
-        var hit = search.match(/(?:^|[?&])state=(empty|error)(?![a-z])/);
+        var hit = search.match(/(?:^|[?&])state=(loading|empty|error)(?![a-z])/);
         if (hit) forced = hit[1];
       } catch (e) {
         forced = '';
       }
+
+      /* ---------- 调试开关 2：从地址栏读 ?favfail=1 ----------
+         让收藏请求一律失败，用来验收「失败提示」那条路径。
+         开关本身定义在 concepts.js 第四节；正常访问不会带这个参数。
+         例：http://127.0.0.1:8000/?favfail=1 */
+      try {
+        if (/(?:^|[?&])favfail=1(?![0-9])/.test(String(window.location.search))
+            && typeof FAVORITE_FORCE_FAIL !== 'undefined') {
+          FAVORITE_FORCE_FAIL = true;
+        }
+      } catch (e) { /* 读不到地址栏就不开这个开关，不影响正常使用 */ }
+
+      /* ---------- 收藏按钮的点击监听（事件委托） ----------
+         只绑一次，绑在最外层的列表容器上。卡片是脚本生成的，
+         委托给容器就不必每次重渲染后重新绑，也不会重复绑。 */
+      listEl.addEventListener('click', function (e) {
+        var target = e.target;
+        var btn = (target && target.closest) ? target.closest('.fav-btn') : null;
+        if (!btn || !listEl.contains(btn)) return;
+
+        /* 按钮与 <a> 是兄弟节点，点它不会跳转；
+           这一行是保险：万一将来有人把按钮挪回 <a> 里面，也不会跳走。 */
+        e.preventDefault();
+        onFavClick(btn);
+      });
 
       /* ==========================================================================
        * 状态 1 / 4：加载中
@@ -382,20 +689,27 @@
 
         countEl.innerHTML = countText;
 
-        /* 渲染概念卡片 */
+        /* 渲染概念卡片
+           Day 11 改动：整张卡片外面多包一层 .item-wrap，收藏按钮放在这一层里、
+           与 <a> 平级 —— <a> 里不能再套 <button>（HTML 不允许交互元素嵌套）。
+           卡片本身的日期 / 标题 / 定义三行原样不动，收藏按钮用绝对定位
+           压回右上角，所以卡片高度、行距、内边距一个像素都没变。 */
         var html = '';
         for (var j = 0; j < list.length; j++) {
           var c = list[j];
 
-          html += '<a class="item" href="concept.html?id=' + encodeURIComponent(c.slug) + '">';
-          html += '  <div class="item-meta">';
-          html += '    <span>' + esc(c.date || '日期待补充') + '</span>';
-          if (!isConceptComplete(c)) html += '    <span class="tag-todo">待补充</span>';
-          html += '  </div>';
-          html += '  <h2 class="item-title">' + esc(c.titleZh)
-                +   '<span class="en">' + esc(c.titleEn) + '</span></h2>';
-          html += '  <p class="item-def">' + esc(c.definition) + '</p>';
-          html += '</a>';
+          html += '<div class="item-wrap">';
+          html += '  <a class="item" href="concept.html?id=' + encodeURIComponent(c.slug) + '">';
+          html += '    <div class="item-meta">';
+          html += '      <span>' + esc(c.date || '日期待补充') + '</span>';
+          if (!isConceptComplete(c)) html += '      <span class="tag-todo">待补充</span>';
+          html += '    </div>';
+          html += '    <h2 class="item-title">' + esc(c.titleZh)
+                +       '<span class="en">' + esc(c.titleEn) + '</span></h2>';
+          html += '    <p class="item-def">' + esc(c.definition) + '</p>';
+          html += '  </a>';
+          html += '  ' + favButtonHtml(c);
+          html += '</div>';
         }
         listEl.innerHTML = html;
       }
@@ -441,6 +755,13 @@
         renderError();
         return;
       }
+
+      /* 调试开关优先：?state=loading 就停在加载态，不再往下取数。
+         用的是上面同一个 renderLoading()，所以画面与真实加载态完全一致 ——
+         不是另造一个「看起来像加载」的假状态。
+         位置放在「数据文件没加载成功」的检查之后：那种情况属于真出错，
+         该显示错误态，不该被定格在加载中。 */
+      if (forced === 'loading') { return; }
 
       /* 异步取数：等待期间页面停在「加载中」 */
       fetchConceptList(function (list) {

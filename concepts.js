@@ -424,3 +424,47 @@ function fetchConceptList(onDone) {
     onDone(getConceptList());
   }, MOCK_DELAY_MS);
 }
+
+
+/* ==========================================================================
+ * 四、mock 收藏服务（Day 11 新增）
+ * --------------------------------------------------------------------------
+ * 今天只做「前端临时状态」，不接数据库。这一层不写任何数据、不发任何网络请求，
+ * 只做一件事：用 setTimeout 假装「请求在路上」，让「处理中」和「失败」
+ * 这两种状态真的能被看到、能被验收。
+ *
+ * 收藏结果存在 index.html 的内存变量里，刷新页面即清空 ——
+ * 与 PRD.md §5.7「不写浏览器存储」保持一致。
+ *
+ * 将来要改什么：
+ *   把下面的 setTimeout 换成真实请求即可 —— 成功调 onDone()，
+ *   失败调 onError()，页面里的调用形状一行都不用改。
+ * ========================================================================== */
+
+/* 假装「收藏请求来回要花的时间」，单位毫秒。
+   故意比取数慢一些（700ms），这样「处理中」的禁用状态肉眼看得清，
+   也方便验证「连点两下只提交一次」。 */
+var MOCK_FAVORITE_DELAY_MS = 700;
+
+/* 故障注入开关：默认关闭。
+   index.html 从地址栏读到 ?favfail=1 时会把它置为 true，用来验收「失败提示」。
+   真实使用中它永远是 false。 */
+var FAVORITE_FORCE_FAIL = false;
+
+/**
+ * 切换一条概念的收藏状态（mock 版，不落库、不写存储）。
+ *
+ * @param {string}   slug    概念编号，例如 "007-rag"
+ * @param {function} onDone  成功回调
+ * @param {function} onError 失败回调，参数是一个 Error
+ */
+function toggleFavoriteMock(slug, onDone, onError) {
+  setTimeout(function () {
+    if (FAVORITE_FORCE_FAIL) {
+      /* 失败路径也留一句提示，方便在控制台里看出是哪一步失败 */
+      onError(new Error('mock: 收藏请求失败（?favfail=1 强制注入）'));
+      return;
+    }
+    onDone();
+  }, MOCK_FAVORITE_DELAY_MS);
+}

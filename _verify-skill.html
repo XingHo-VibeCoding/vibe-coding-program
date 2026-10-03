@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skill 验证页 · 标签筛选三态</title>
+<!--
+  ==========================================================================
+  临时验证页（2026-09-27，Day 12）
+  --------------------------------------------------------------------------
+  这是什么：
+    一个用来「真实调用 frontend-page-rules 技能并跑通筛选三态」的临时页面。
+    它不是网站的正式功能页 —— PRD.md §1.4 / §3 F1 与 TECH_DESIGN.md §5.4
+    都写明「不做分类筛选与标签页」。本页只是验证靶子，验证完可删。
+
+  文件名为什么以下划线开头：
+    明确标注「临时产物」，与 index.html / concept.html 区分开。
+
+  它验证什么：
+    1. 用 concepts.js 里每条记录已有的 tags 字段做筛选
+    2. 三种情况：有结果 / 无结果 / 清空恢复
+    3. 当前状态写在 <main id="list" data-state="..."> 上，DevTools 可直接读
+
+  它遵守哪些规则（全部来自 .workbuddy/skills/frontend-page-rules/SKILL.md）：
+    §1 页面层级：页头 → 主内容 → 页脚；层级靠间距亲疏表达
+    §2 颜色和字体：复用同一套令牌；小字号强调色用 --accent-text
+    §3 卡片与按钮：focus-visible 全站一致；hover 不用 opacity，用加深底色
+    §4 移动端适配：≤480px 只收内边距 + 降字号，不重排层级
+    §6 修改后验证：状态写 data-state，便于机器读取
+  ==========================================================================
+-->
+<style>
+    /* -------- 设计令牌：与 index.html / concept.html 逐字一致（SKILL §2 第 7 条） -------- */
+    :root {
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1a1d21;
+      --text-soft: #5b6472;
+      --line: #e4e7ec;
+      --accent: #2f6fed;        /* 只用于色块 / 边框 / 按钮底，不用于小字号文字 */
+      --accent-text: #2560d8;   /* 小字号强调文字专用：浅灰底 5.23:1，白卡 5.61:1 */
+      --accent-soft: #eaf0fe;
+      --radius: 14px;
+
+      /* 间距刻度：4px 基数 */
+      --sp-1: 4px;
+      --sp-2: 8px;
+      --sp-3: 12px;
+      --sp-4: 16px;
+      --sp-5: 20px;
+      --sp-6: 24px;
+      --sp-7: 32px;
+      --sp-8: 40px;
+      --sp-9: 56px;
+      --sp-10: 80px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                   "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* -------- 布局：正文宽 760px（SKILL §2 第 4 条） -------- */
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: var(--sp-9) var(--sp-5) var(--sp-10);
+    }
+
+    /* ==========================================================================
+       §1 页面层级
+       标题块内部 8px / 标题块到下一个块 32px / 块到内容列表 16px
+       比例约 1 : 4 : 2，读得出层级
+       ========================================================================== */
+    .head { margin-bottom: var(--sp-7); }   /* 标题块 → 下一个块：32px */
+
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      line-height: 1;
+      color: var(--accent-text);
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      padding: var(--sp-1) var(--sp-2);
+      margin-bottom: var(--sp-2);          /* 标题块内部：8px */
+    }
+
+    h1 {
+      font-size: 34px;
+      line-height: 1.25;
+      margin: 0 0 var(--sp-2);             /* 标题块内部：8px */
+      letter-spacing: -0.01em;
+    }
+
+    .sub {
+      margin: 0;                            /* 已在标题块内 8px 之后 */
+      color: var(--text-soft);
+      font-size: 15px;
+    }
+
+    /* -------- 筛选区 -------- */
+    .filter-sec { margin-bottom: var(--sp-7); }
+
+    .filter-label {
+      margin: 0 0 var(--sp-3);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-soft);
+      letter-spacing: 0.02em;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--sp-2);
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    /* §3 卡片与按钮：按钮至少三态；hover 加深底色，不用 opacity */
+    .chip {
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.4;
+      color: var(--text);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: var(--sp-2) var(--sp-4);
+      cursor: pointer;
+      transition: border-color .15s, background .15s, color .15s;
+    }
+
+    .chip:hover {
+      /* 刻意不用 opacity：降透明度会把文字对比度一起降下去 */
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent-text);
+    }
+
+    /* §3 第 4 条：每个可交互元素都要有 focus-visible，全站样式一致 */
+    .chip:focus-visible {
+      outline: 3px solid var(--accent-text);
+      outline-offset: 2px;
+    }
+
+    /* 选中态：底色用 --accent（色块允许），文字用白色 */
+    .chip[aria-pressed="true"] {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #ffffff;
+      font-weight: 600;
+    }
+
+    /* -------- 计数行：筛选区 → 列表 之间的过渡，16px -------- */
+    .count {
+      margin: 0 0 var(--sp-4);
+      font-size: 14px;
+      color: var(--text-soft);
+    }
+
+    .count strong { color: var(--accent-text); font-weight: 600; }
+
+    /* ==========================================================================
+       §3 卡片：本页卡片内没有按钮，用最简形态
+       ========================================================================== */
+    .list { display: block; }
+
+    .item {
+      display: block;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--sp-5) var(--sp-6);
+      margin-bottom: var(--sp-4);
+      transition: border-color .15s, box-shadow .15s;
+    }
+
+    .item:hover {
+      border-color: var(--accent);
+      box-shadow: 0 2px 10px rgba(47, 111, 237, .08);
+    }
+
+    .item-top {
+      display: flex;
+      align-items: baseline;
+      gap: var(--sp-3);
+      margin-bottom: var(--sp-2);
+    }
+
+    .item-no {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent-text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .item-date { font-size: 13px; color: var(--text-soft); margin-left: auto; }
+
+    .item-title { font-size: 19px; font-weight: 600; margin: 0 0 var(--sp-1); }
+
+    .item-en { font-size: 13px; color: var(--text-soft); margin: 0 0 var(--sp-3); }
+
+    .item-def { margin: 0 0 var(--sp-3); font-size: 15px; }
+
+    .item-tags { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin: 0; padding: 0; list-style: none; }
+
+    .tag {
+      font-size: 12px;
+      line-height: 1;
+      color: var(--accent-text);
+      background: var(--accent-soft);
+      border-radius: var(--sp-1);
+      padding: var(--sp-1) var(--sp-2);
+    }
+
+    /* -------- 空态 / 加载态 / 错误态 面板（沿用既有 .panel 样式） -------- */
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: var(--sp-8) var(--sp-7);
+      text-align: center;
+    }
+
+    .panel-title { margin: 0 0 var(--sp-2); font-size: 17px; font-weight: 600; }
+    .panel-desc { margin: 0; font-size: 14px; color: var(--text-soft); }
+
+    .foot {
+      margin-top: var(--sp-10);
+      padding-top: var(--sp-6);
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+      color: var(--text-soft);
+    }
+
+    .foot code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      border-radius: var(--sp-1);
+      padding: 2px var(--sp-1);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+
+    /* ==========================================================================
+       §4 移动端适配：≤480px 只收内边距 + 降字号，不重排信息层级
+       ========================================================================== */
+    @media (max-width: 480px) {
+      .wrap { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+      h1 { font-size: 28px; }
+      .panel { padding: var(--sp-5); }
+      .item { padding: var(--sp-4); }
+    }
+</style>
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- §1 页头：标题 + 一句话定位。恶意徽标不放首屏第一行之外的干扰元素 -->
+    <div class="head">
+      <span class="badge">临时验证页 · 非正式功能</span>
+      <h1>标签筛选三态验证</h1>
+      <p class="sub">
+        用 <code>concepts.js</code> 里每条记录的 <code>tags</code> 字段做筛选，
+        验证「有结果 / 无结果 / 清空恢复」三种情况。本页用于真实调用
+        <code>frontend-page-rules</code> 技能。
+      </p>
+    </div>
+
+    <!-- 筛选区 -->
+    <div class="filter-sec">
+      <p class="filter-label" id="filter-label">筛选条件（点击标签）</p>
+      <ul class="chips" id="chips" role="group" aria-labelledby="filter-label"></ul>
+    </div>
+
+    <!-- 计数行 -->
+    <p class="count" id="count" aria-live="polite">正在加载…</p>
+
+    <!--
+      主内容容器
+      data-state 取值：loading / success / empty / error
+      DevTools 里可直接读到当前状态，比截图可靠
+    -->
+    <main class="list" id="list" data-state="loading"></main>
+
+    <footer class="foot">
+      <p>
+        Day 12（2026-09-27）· Skill 验证产物 ·
+        规则来源 <code>.workbuddy/skills/frontend-page-rules/SKILL.md</code>
+      </p>
+    </footer>
+
+  </div>
+
+  <script src="concepts.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    var listEl = document.getElementById('list');
+    var chipsEl = document.getElementById('chips');
+    var countEl = document.getElementById('count');
+
+    var ALL = '__all__';       // 「全部」这个虚拟标签
+    var activeTag = ALL;       // 当前选中的标签
+    var allConcepts = [];      // 取回来的全量数据
+
+    /* ---------- 工具：设置状态 ---------- */
+    function setState(state) {
+      listEl.setAttribute('data-state', state);
+    }
+
+    /* ------------------------------------------------------------------
+     * 取全部标签（去重），并在最前面插入「全部」
+     * 数据来自 concepts.js 的 tags 数组，不在页面里硬编码
+     * ------------------------------------------------------------------ */
+    function collectTags(list) {
+      var seen = {};
+      var out = [];
+      list.forEach(function (c) {
+        (c.tags || []).forEach(function (t) {
+          if (!seen[t]) { seen[t] = true; out.push(t); }
+        });
+      });
+      return out;
+    }
+
+    /* ---------- 渲染筛选按钮 ---------- */
+    function renderChips(tags, total) {
+      var html = '';
+      html += '<li><button type="button" class="chip" data-tag="' + ALL + '"'
+            + ' aria-pressed="' + (activeTag === ALL) + '">全部（' + total + '）</button></li>';
+      tags.forEach(function (t) {
+        var n = allConcepts.filter(function (c) {
+          return (c.tags || []).indexOf(t) !== -1;
+        }).length;
+        html += '<li><button type="button" class="chip" data-tag="' + t + '"'
+              + ' aria-pressed="' + (activeTag === t) + '">' + t + '（' + n + '）</button></li>';
+      });
+      chipsEl.innerHTML = html;
+    }
+
+    /* ---------- 渲染一条卡片 ---------- */
+    function itemHtml(c) {
+      var tags = (c.tags || []).map(function (t) {
+        return '<li class="tag">' + t + '</li>';
+      }).join('');
+
+      return '<article class="item">'
+           +   '<div class="item-top">'
+           +     '<span class="item-no">' + String(c.serialNo || '').padStart(3, '0') + '</span>'
+           +     '<span class="item-date">' + (c.date || '') + '</span>'
+           +   '</div>'
+           +   '<h2 class="item-title">' + (c.titleZh || '') + '</h2>'
+           +   '<p class="item-en">' + (c.titleEn || '') + '</p>'
+           +   '<p class="item-def">' + (c.definition || '') + '</p>'
+           +   '<ul class="item-tags">' + tags + '</ul>'
+           + '</article>';
+    }
+
+    /* ------------------------------------------------------------------
+     * 核心：按当前 activeTag 渲染列表
+     * 三种结果落在 data-state 上：
+     *   success —— 有结果
+     *   empty   —— 无结果
+     *   （清空恢复后会回到 success）
+     * ------------------------------------------------------------------ */
+    function render() {
+      setState('loading');
+
+      var result;
+      if (activeTag === ALL) {
+        result = allConcepts;
+      } else {
+        result = allConcepts.filter(function (c) {
+          return (c.tags || []).indexOf(activeTag) !== -1;
+        });
+      }
+
+      var label = (activeTag === ALL) ? '全部概念' : '标签「' + activeTag + '」';
+
+      if (result.length === 0) {
+        /* 无结果 —— 空态 */
+        setState('empty');
+        countEl.innerHTML = '<strong>0</strong> 条结果 · ' + label;
+        listEl.innerHTML =
+            '<div class="panel">'
+          +   '<h2 class="panel-title">这个标签下暂时没有内容</h2>'
+          +   '<p class="panel-desc">当前筛选：' + label
+          +   '。点上面的「全部」可以清空筛选，回到完整列表。</p>'
+          + '</div>';
+        return;
+      }
+
+      /* 有结果 —— success 态 */
+      setState('success');
+      countEl.innerHTML = '<strong>' + result.length + '</strong> 条结果 · ' + label;
+      listEl.innerHTML = result.map(itemHtml).join('');
+    }
+
+    /* ---------- 点击筛选按钮 ---------- */
+    chipsEl.addEventListener('click', function (e) {
+      var btn = e.target.closest('.chip');
+      if (!btn) return;
+
+      activeTag = btn.getAttribute('data-tag');
+
+      /* 同步 aria-pressed，便于机器核对选中态 */
+      Array.prototype.forEach.call(chipsEl.querySelectorAll('.chip'), function (b) {
+        b.setAttribute('aria-pressed', String(b.getAttribute('data-tag') === activeTag));
+      });
+
+      render();
+
+      /* 把当前筛选写进地址栏，便于截图时地址栏能看出筛选条件
+         （用 replaceState 不产生历史堆栈，避免污染返回键） */
+      try {
+        var url = new URL(window.location.href);
+        if (activeTag === ALL) {
+          url.searchParams.delete('tag');
+        } else {
+          url.searchParams.set('tag', activeTag);
+        }
+        window.history.replaceState(null, '', url.toString());
+      } catch (err) { /* 极老浏览器忽略即可 */ }
+    });
+
+    /* ------------------------------------------------------------------
+     * 启动：走 concepts.js 的 mock 异步取数
+     * 加载中 → 数据回来后渲染
+     * ------------------------------------------------------------------ */
+    function boot() {
+      setState('loading');
+      countEl.textContent = '正在加载…';
+
+      var fromUrl = null;
+      try {
+        fromUrl = new URL(window.location.href).searchParams.get('tag');
+      } catch (err) { /* ignore */ }
+
+      fetchConceptList(function (list) {
+        allConcepts = list;
+        var tags = collectTags(list);
+
+        /* 地址栏带了 ?tag=xxx 就沿用，否则默认「全部」 */
+        if (fromUrl && (fromUrl === ALL || tags.indexOf(fromUrl) !== -1)) {
+          activeTag = fromUrl;
+        } else {
+          activeTag = ALL;
+        }
+
+        renderChips(tags, list.length);
+        render();
+      });
+    }
+
+    /* 调试用：允许外部脚本读取当前态，便于自动验证 */
+    window.__verifyState = function () {
+      return {
+        state: listEl.getAttribute('data-state'),
+        activeTag: activeTag,
+        renderedCount: listEl.querySelectorAll('.item').length,
+        total: allConcepts.length,
+      };
+    };
+
+    boot();
+  })();
+  </script>
+</body>
+</html>
