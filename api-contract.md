@@ -1,15 +1,16 @@
 # API 契约（api-contract.md）
 
-> **文档性质：接口契约（Day 15 登记；Day 17 实现读接口；Day 18 新增第一个写接口）。**
+> **文档性质：接口契约（Day 15 登记；Day 17 实现读接口；Day 18 新增第一个写接口；Day 19 补收藏读回接口）。**
 > 本文是前后端之间的"合同"：前端按这里的形状写解析逻辑，后端按这里的形状实现。
 > 契约口径已于 2026-09-30 拍板为**方案 A**：只登记本项目自己的接口（依据 `TECH_DESIGN.md` §5.2）。
 > 「今日热搜」模板里的 `/api/hot`、`/api/sync` 等接口**不属于本项目**，未登记（理由见 §5）。
 >
-> - 版本：v0.4 · 日期：2026-10-03
+> - 版本：v0.5 · 日期：2026-10-04
+> - 修订记录：**v0.5（2026-10-04，Day 19）** —— 新增 §4.5 `GET /api/favorites`（收藏列表读回）。属需求变更：§4.4 原写「本期不做 `GET /api/favorites`」，但 Day 19 清单明确要求「写入后再调一次读取接口确认新数据能被读出来」，**读写闭环必须有读接口才能成立**，故登记。同步修改 `PRD.md` §1.4 变更记录与 `TECH_DESIGN.md` §9.5 的例外口径；§1 路由表补 GET 说明；§4.4 要点第 4 条改为「GET 见 §4.5，PATCH/DELETE 仍不做」；§7 自检加一列；**无新增错误码**（复用 `DB_UNAVAILABLE` / `INTERNAL_ERROR`）。
 > - 修订记录：**v0.4（2026-10-03，Day 18）** —— 新增 §4.4 `POST /api/favorites`（本项目**第一个写接口**，属需求变更：原 PRD §1.4 把「收藏」列为刻意排除、§5.4 声明「无持久化」，Day 11 已做收藏前端交互，Day 18 提前做持久化，故同步修改 PRD 与 `TECH_DESIGN` §9.5）；§3 码表补 4 个收藏错误码；§1 路由表补 `/api/favorites`；§5 原「不做 favorites」条目改为变更说明。
 > - 修订记录：**v0.3（2026-10-02，Day 17）** —— §4.2 / §4.3 由「未实现」标记为「已实现」并登记实测结论；修正 §1 生产 Base URL 笔误（`1498985639` → `1498895639`，数字顺序错误）；§3 码表补 `NOT_FOUND`（404 兜底，2026-10-02 拍板登记）。
 > - 修订记录：**v0.2（2026-10-02，Day 17 拍板 2A）** —— §4.3 的 `useCases[].text` 改为 `useCases[].content`、`sources[].title` 改为 `sources[].label`，与数据库列名（`concept_use_cases.content` / `concept_sources.label`）及 `concepts.js` 键名对齐。
-> - 契约状态：读接口 3 个**已实现并公网验证**（Day 17：54/54 项形状比对通过；真库验证通过）；写接口 1 个（`POST /api/favorites`）**Day 18 实现并验证**。
+> - 契约状态：读接口 4 个（`GET /api/health`、`GET /api/concepts`、`GET /api/concepts/{slug}` Day 17 实现并公网验证，54/54 项形状比对通过；`GET /api/favorites` **Day 19 实现并验证**）；写接口 1 个（`POST /api/favorites`）**Day 18 实现并验证**。
 
 ---
 
@@ -18,7 +19,7 @@
 | 项 | 值 | 说明 |
 |---|---|---|
 | 生产 Base URL | `https://ai-concept-daily-d2ex3o18b05e6dd-1498895639.ap-shanghai.app.tcloudbase.com` | CloudBase HTTP 访问服务的默认域名（API 网关），**只服务接口，不服务页面**（v0.3 修正笔误） |
-| 已挂路由 | `/api/health` → 云函数 `api`<br>`/api/concepts` → 云函数 `api`（前缀覆盖 `/api/concepts/{slug}`）<br>`/api/favorites` → 云函数 `api`（Day 18 新增） | 三条路由均开启路径透传（`enablePathTransmission=true`）；路由不带方法限制，方法由云函数内部判定 |
+| 已挂路由 | `/api/health` → 云函数 `api`<br>`/api/concepts` → 云函数 `api`（前缀覆盖 `/api/concepts/{slug}`）<br>`/api/favorites` → 云函数 `api`（Day 18 新增） | 三条路由均开启路径透传（`enablePathTransmission=true`）；**路由不带方法限制，方法由云函数内部判定**——故 Day 19 新增 `GET /api/favorites` **不需要新建网关路由**，与 `POST /api/favorites` 共用既有那一条 |
 | 计划路由 | ~~`/api` → 同一个云函数 `api`~~（Day 17 实际按接口各挂一条前缀路由，见上） | 按 `TECH_DESIGN.md` 方案 B1，所有接口由这一个函数承载 |
 | 前端调用方式 | 相对路径或 `VITE_API_BASE_URL` | `TECH_DESIGN.md` §8.2；若两服务不同域，会触发跨域——**本期不处理**（见 §6） |
 
@@ -172,7 +173,41 @@
 > 1. **防重复**：同一概念重复收藏返回 `DUPLICATE_FAVORITE`(409)，**不写入第二行**；数据库上以 `favorites.concept_id` 的 `UNIQUE` 约束兜底，云函数捕获唯一冲突后转成该业务码。
 > 2. **响应回 `slug` 不回 `concept_id`**：内部主键不外泄，前端只认 `slug`。
 > 3. `slug` 在 `concepts` 表查不到 → `CONCEPT_NOT_FOUND`(404)，与 §4.3 复用同一个码。
-> 4. 本期**不做**：`GET`/`PATCH`/`DELETE /api/favorites`（PATCH/DELETE 属第 4 周）、批量写入、收藏列表分页。
+> 4. 本组接口**不做**：`PATCH`/`DELETE /api/favorites`（属第 4 周）、批量写入、收藏列表分页。`GET /api/favorites` 已于 Day 19 登记为 §4.5（原 v0.4 的「本期不做 GET」按需求变更改口径，理由见文首修订记录）。
+
+### 4.5 `GET /api/favorites` —— 收藏列表（写后读回） ✅ 已实现（Day 19）
+
+| 项 | 内容 |
+|---|---|
+| 用途 | 读回已收藏的概念列表。为 Day 19「写入 → 读回」闭环提供读侧；也是将来「收藏页」的数据源（前端接线仍待办，见 §6.4） |
+| 请求参数 | **无**（本期不做分页/筛选——`PRD §1.4`） |
+| 成功响应 | `200`，`data` 形状见下方 JSON |
+| 错误响应 | `DB_UNAVAILABLE`(503) / `INTERNAL_ERROR`(500) |
+
+```json
+{
+  "ok": true,
+  "data": {
+    "items": [
+      {
+        "id": 2,
+        "slug": "001-large-language-model",
+        "note": "Day 19 写入验证",
+        "createdAt": "2026-10-04T10:47:12.345Z"
+      }
+    ],
+    "count": 2
+  },
+  "error": null
+}
+```
+
+> 要点：
+> 1. **排序由服务端做**：`createdAt` 倒序（最新收藏在最前），方便"刚写完就能在第一条看到"。
+> 2. **只回 `slug` 不回 `concept_id`**：与 §4.4 同一口径，内部主键不外泄（跨表取 `slug` 由服务端关联完成）。
+> 3. `note` 没填时回 `null`，不回空字符串——前端只判 `null` 一种情况。
+> 4. `createdAt` 统一为 UTC 的 ISO 8601（`…Z`），处理方式同 §4.4（PostgREST 原样回的是 `+08:00` 偏移 + 5 位小数秒，服务端显式转换）。
+> 5. 空表时回 `{ "items": [], "count": 0 }`，**不是错误**（前端渲染空态）。
 
 ---
 
@@ -183,10 +218,12 @@
 | 不登记 | 理由 |
 |---|---|
 | `GET /api/hot`（热搜列表）、`POST /api/sync`（同步热搜） | 这是「今日热搜」项目的接口；本项目是概念词典，没有"热搜"概念 |
-| `GET` / `PATCH` / `DELETE /api/favorites` | `POST` 已于 Day 18 登记为 §4.4（见下方变更说明）；其余方法仍不做 |
+| `PATCH` / `DELETE /api/favorites` | 属第 4 周；`POST` 见 §4.4（Day 18）、`GET` 见 §4.5（Day 19） |
 | 登录/注册、搜索、分页、埋点 | `PRD §1.4` 明确不做 |
 
 > **⚠️ 变更说明（Day 18，2026-10-03）**：本表原有一条「`GET/POST /api/favorites`、`PATCH/DELETE /api/favorites/:id` —— 本项目**任何写接口都不做**」。按训练营 Day 18 进度，**收藏持久化提前到今天**：这属于需求变更，故已同步修改 `PRD.md` §1.4 / §5.4 与 `TECH_DESIGN.md` §9.5 的排除口径，随后登记 §4.4。**变更纪律不变**：今后若要再加写接口，仍须先改 PRD、再改本文。
+>
+> **⚠️ 变更说明（Day 19，2026-10-04）**：§4.4 原第 4 条写「本期不做 `GET /api/favorites`」。Day 19 清单要求「写入后再调一次读取接口（`GET /api/favorites`），确认新写入的数据能被读出来」——**没有读接口，读写闭环就只是半条**。故把该条改为「`GET` 属本期（§4.5），`PATCH`/`DELETE` 仍属第 4 周」，同步在 `PRD.md` §1.4 变更记录补一行、`TECH_DESIGN.md` §9.5 例外口径补读接口。**未新增错误码、未新增网关路由。**
 
 ---
 
@@ -201,15 +238,15 @@
 
 ## 7. 契约完整性自检（对照今日"契约完整性检测"标准）
 
-| 检查项 | 4.1 health | 4.2 concepts | 4.3 concepts/{slug} | 4.4 POST favorites |
-|---|---|---|---|---|
-| 路径 | ✅ | ✅ | ✅ | ✅ |
-| 方法 | ✅ GET | ✅ GET | ✅ GET | ✅ POST |
-| 请求参数 | ✅（无） | ✅（无） | ✅（路径参数 slug） | ✅（JSON 体 slug/note） |
-| 响应 JSON 形状 | ✅ | ✅ | ✅ | ✅ |
-| 错误形状 | ✅（网关级） | ✅（复用 §3 码表） | ✅（复用 §3 码表） | ✅（§3 码表 + 4 个新码） |
-| 统一信封 | ✅（含 ok 字段） | ✅ | ✅ | ✅ |
+| 检查项 | 4.1 health | 4.2 concepts | 4.3 concepts/{slug} | 4.4 POST favorites | 4.5 GET favorites |
+|---|---|---|---|---|---|
+| 路径 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 方法 | ✅ GET | ✅ GET | ✅ GET | ✅ POST | ✅ GET |
+| 请求参数 | ✅（无） | ✅（无） | ✅（路径参数 slug） | ✅（JSON 体 slug/note） | ✅（无） |
+| 响应 JSON 形状 | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 错误形状 | ✅（网关级） | ✅（复用 §3 码表） | ✅（复用 §3 码表） | ✅（§3 码表 + 4 个新码） | ✅（复用 `DB_UNAVAILABLE`/`INTERNAL_ERROR`） |
+| 统一信封 | ✅（含 ok 字段） | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
-*本文登记契约。Day 17 已实现并验证 3 个读接口；Day 18 新增并实现 `POST /api/favorites`。依据：`TECH_DESIGN.md` §5.2/§5.3/§5.4、`PRD.md` §1.4/§7、2026-09-30 拍板记录、2026-10-03（Day 18）需求变更拍板。*
+*本文登记契约。Day 17 已实现并验证 3 个读接口；Day 18 新增并实现 `POST /api/favorites`；Day 19 新增并实现 `GET /api/favorites`（读写闭环成立）。依据：`TECH_DESIGN.md` §5.2/§5.3/§5.4、`PRD.md` §1.4/§7、2026-09-30 拍板记录、2026-10-03（Day 18）需求变更拍板、2026-10-04（Day 19）清单第 5 步。*
