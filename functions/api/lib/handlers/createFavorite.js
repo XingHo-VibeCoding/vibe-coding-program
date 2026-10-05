@@ -1,18 +1,22 @@
 // ==========================================================
 // POST /api/favorites —— 收藏一个概念（api-contract.md §4.4，Day 18）
 //
-// 本项目第一个写接口。流程分四步：
+// 分层（Day 19 重构）：
+//   本文件只留**业务编排** —— 校验请求体、把数据层信号翻成业务错误码、组装响应。
+//   表级查询与写入搬到 lib/repositories/conceptsRepo.js / favoritesRepo.js。
+//
+// 流程四步：
 //   1. 校验请求体：slug 必填 / 必须字符串 / 不超过 64 字；note 可选 / 字符串 / 不超过 200 字
 //      （任一不合格直接拒，message 全是中文人话 —— 清单「缺必填字段被拒且提示是中文」）
-//   2. 用 slug 在 concepts 表查内部 id（查不到 → CONCEPT_NOT_FOUND 404）
-//   3. 插入 favorites。concept_id 上有 UNIQUE 约束，重复插入会撞 23505，
-//      捕获后转成 DUPLICATE_FAVORITE 409 —— 清单「重复提交被拒」，且不会写入第二行
+//   2. 用 slug 查内部 id（查不到 → CONCEPT_NOT_FOUND 404）
+//   3. 插入 favorites；重复收藏由数据层抛 DuplicateFavoriteError，这里转成 DUPLICATE_FAVORITE 409
 //   4. 返回 { ok:true, data:{ id, slug, note, createdAt }, error:null }
 //
 // 为什么响应回 slug 不回 concept_id：内部主键不外泄，前端只认 slug。
 // ==========================================================
 
-const { get, insert, RestError } = require('../db');
+const { findConceptRefBySlug } = require('../repositories/conceptsRepo');
+const { insertFavorite, DuplicateFavoriteError } = require('../repositories/favoritesRepo');
 const { ApiError } = require('../errors');
 
 const MAX_SLUG_LEN = 64;
@@ -54,17 +58,16 @@ async function createFavorite(body) {
   const note = normalizeNote(body.note);
 
   // slug → 内部 id（顺带确认这个概念真的存在，避免收藏到不存在的概念）
-  const rows = await get('concepts', `select=id,slug&slug=eq.${encodeURIComponent(slug)}&limit=1`);
-  const concept = Array.isArray(rows) && rows.length ? rows[0] : null;
+  const concept = await findConceptRefBySlug(slug);
   if (!concept) throw new ApiError('CONCEPT_NOT_FOUND', `slug=${slug}`);
 
   let created;
   try {
-    created = await insert('favorites', { concept_id: concept.id, note });
+    created = await insertFavorite({ conceptId: concept.id, note });
   } catch (err) {
     // 唯一约束冲突 = 这个概念已经收藏过了（属业务拒绝，不是服务器故障）
-    if (err instanceof RestError && err.code === 'PGW_CONFLICT') {
-      throw new ApiError('DUPLICATE_FAVORITE', `concept_id=${concept.id}`);
+    if (err instanceof DuplicateFavoriteError) {
+      throw new ApiError('DUPLICATE_FAVORITE', err.detail);
     }
     throw err;
   }
@@ -75,9 +78,7 @@ async function createFavorite(body) {
       id: created.id,
       slug: concept.slug,
       note: created.note === undefined ? note : created.note,
-      // 统一成 UTC 的 ISO 8601：PostgREST 默认回 "+08:00" 偏移 + 5 位小数秒，
-      // 与契约 §4.4 示例（…Z）形状不一致，故显式转一次。
-      createdAt: created.created_at ? new Date(created.created_at).toISOString() : null,
+      createdAt: created.createdAt,
     },
     error: null,
   };
