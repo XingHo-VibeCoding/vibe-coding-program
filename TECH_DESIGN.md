@@ -864,7 +864,7 @@ v_published_concepts（视图，在完整视图之上）
 |---|---|
 | 用户认证模块（即使平台内置） | §4.1 属后续功能 |
 | 后台界面、内容编辑器 | §1.4 |
-| 写接口（**例外**：Day 18 起仅登记 `POST /api/favorites` 一个写接口，见 `api-contract.md` §4.4；PATCH/DELETE 与批量写入仍不做）。配套读接口 `GET /api/favorites` 于 Day 19 登记（§4.5），属同一例外的读侧，不另开例外 | §1.4 |
+| 写接口（**例外**：Day 18 起登记 `POST /api/favorites`，见 `api-contract.md` §4.4；Day 22 补 `PATCH` / `DELETE /api/favorites/{id}`，见 §4.6 / §4.7）。配套读接口 `GET /api/favorites` 于 Day 19 登记（§4.5），属同一例外的读侧。**增删改查四类操作至此齐备；批量写入 / 批量删除仍不做** | §1.4 |
 | 搜索、筛选、分页、标签页 | §1.4、§3 F1 边界 |
 | 埋点、访问统计、第三方错误上报 | §1.4、§5.4 |
 | 大模型调用 / AI 批改 | §3 F4 边界、§1.4 |

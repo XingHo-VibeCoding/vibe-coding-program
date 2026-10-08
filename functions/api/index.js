@@ -7,6 +7,11 @@
 //   GET  /api/concepts/{slug}   -> 详情 6 段（api-contract §4.3）
 //   POST /api/favorites         -> 收藏一个概念（api-contract §4.4；Day 18 新增，本项目唯一写接口）
 //   GET  /api/favorites         -> 收藏列表，写后读回（api-contract §4.5；Day 19 新增）
+//   PATCH  /api/favorites/{id}   -> 改一条收藏的备注（api-contract §4.6；Day 22 新增）
+//   DELETE /api/favorites/{id}   -> 删一条收藏（api-contract §4.7；Day 22 新增）
+//
+// Day 22 起本项目「增删改查」四类操作齐了：查 = 4 个 GET，删改查收藏 = 上面 3 个，
+// 增 = POST（Day 18）。
 //
 // 统一信封见 api-contract.md §2：
 //   成功 { ok: true,  data,    error: null }
@@ -17,13 +22,15 @@ const { listConcepts } = require('./lib/handlers/listConcepts');
 const { getConcept } = require('./lib/handlers/getConcept');
 const { createFavorite } = require('./lib/handlers/createFavorite');
 const { listFavorites } = require('./lib/handlers/listFavorites');
+const { updateFavorite } = require('./lib/handlers/updateFavorite');
+const { deleteFavorite } = require('./lib/handlers/deleteFavorite');
 const { ApiError, toErrorBody } = require('./lib/errors');
 
 // 从 HTTP 触发事件里解析出 { kind, slug }。
 // 触发路径可能是 /api 或 /，事件里的 path 可能带或不带 /api 前缀，两种都兼容。
 // Day 18 起按方法分流；Day 19 起 GET 走四个读接口（含 /api/favorites 读回）；
-// POST 只放行 /api/favorites；其余方法一律 404 兜底
-// （PATCH / DELETE 留到第 4 周，见 api-contract §4.4 要点 4「本组接口不做」）。
+// Day 22 起 PATCH / DELETE 走 /api/favorites/{id}；
+// 其余方法一律 404 兜底（批量写入等仍不做，见 api-contract §4.6 要点 4）。
 function parseRoute(event) {
   const method = String(
     event.httpMethod || (event.requestContext && event.requestContext.httpMethod) || 'GET'
@@ -50,6 +57,20 @@ function parseRoute(event) {
 
   if (method === 'POST') {
     if (base.length === 1 && base[0] === 'favorites') return { kind: 'createFavorite', method, rawPath };
+    return { kind: 'not_found', method, rawPath };
+  }
+
+  // Day 22：改 / 删。同一个 /api/favorites 前缀网关路由即可覆盖，不需要新建网关路由。
+  // 路径形状：/api/favorites/{id}（两段）。id 原样透传给 handler，由它校验是否为正整数。
+  if (method === 'PATCH' || method === 'DELETE') {
+    if (base.length === 2 && base[0] === 'favorites') {
+      return {
+        kind: method === 'PATCH' ? 'updateFavorite' : 'deleteFavorite',
+        id: decodeURIComponent(base[1]),
+        method,
+        rawPath,
+      };
+    }
     return { kind: 'not_found', method, rawPath };
   }
 
@@ -100,6 +121,10 @@ exports.main = async function (event = {}) {
     } else if (route.kind === 'createFavorite') {
       payload = await createFavorite(parseBody(event));
       status = 201; // 创建成功用 201（api-contract §4.4 约定）
+    } else if (route.kind === 'updateFavorite') {
+      payload = await updateFavorite(route.id, parseBody(event));
+    } else if (route.kind === 'deleteFavorite') {
+      payload = await deleteFavorite(route.id);
     } else {
       throw new ApiError('NOT_FOUND', `path=${route.rawPath}`);
     }

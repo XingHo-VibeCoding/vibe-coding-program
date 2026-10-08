@@ -16,6 +16,18 @@ const TABLE = {
   INVALID_FIELD: { status: 400, message: '收藏的内容格式不对' },
   FIELD_TOO_LONG: { status: 400, message: '备注最多 200 字' },
   DUPLICATE_FAVORITE: { status: 409, message: '这个概念你已经收藏过了' },
+
+  // ---- Day 22 新增：改 / 删接口（PATCH、DELETE /api/favorites/{id}）专属（api-contract v0.6 §3）----
+  FAVORITE_NOT_FOUND: { status: 404, message: '这条收藏已经不在了' },
+  // id 不是正整数（清单「防呆检测」要求的另一种情况）
+  INVALID_ID: { status: 400, message: '收藏编号不对，请刷新页面重试' },
+  // 场景化的必填 / 类型校验码（Day 22）：
+  // 原 MISSING_FIELD=「请指定要收藏的概念」、INVALID_FIELD=「收藏的内容格式不对」
+  // 是写死了 POST 场景的人话。PATCH 里复用会让用户看到驴唇不对马嘴的提示
+  //（改备注却提示"要收藏的概念"）。故拆成 create_* / patch_* 两组。
+  MISSING_NOTE: { status: 400, message: '请填写要改的备注内容' },
+  PATCH_INVALID_FIELD: { status: 400, message: '备注格式不对，只能是文字' },
+  PATCH_FIELD_NOT_ALLOWED: { status: 400, message: '只能改备注，其他内容不能改' },
 };
 
 // 业务错误：code 给前端分支用，detail 只进日志

@@ -114,4 +114,81 @@ async function insert(table, row) {
   return Array.isArray(parsed) ? parsed[0] || {} : parsed || {};
 }
 
-module.exports = { get, insert, RestError };
+// 向一张表更新一行（Day 22 新增，供 PATCH /api/favorites/{id} 用）。
+// PostgREST 写法：PATCH <base>/<table>?<query>，body 为要改的列。
+// 必须带 Prefer: return=representation —— 否则服务端不回行，我们无法区分
+// 「改成功」和「这一行不存在」，防呆就废了（id 不存在必须回 404 而不是假成功）。
+async function update(table, query, patch) {
+  const key = getApiKey();
+  const url = `${BASE_URL}/${table}${query ? '?' + query : ''}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify(patch),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new RestError('PGW_DOWN', (e && e.message) || '网络请求失败', String((e && e.cause) || ''));
+  }
+
+  const text = await res.text().catch(() => '');
+  if (!res.ok) {
+    const detail = `HTTP ${res.status} ${text.slice(0, 200)}`;
+    const code = (res.status === 401 || res.status === 403 || res.status >= 500) ? 'PGW_DOWN' : 'PGW_BUG';
+    throw new RestError(code, `PostgREST HTTP ${res.status}`, detail);
+  }
+
+  let parsed = [];
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    parsed = [];
+  }
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+// 删除一行（Day 22 新增，供 DELETE /api/favorites/{id} 用）。
+// PostgREST 写法：DELETE <base>/<table>?<query>。
+// 同样带 Prefer: return=representation —— 靠回填的行数判断「真的删到了」还是「本来就没有」。
+async function remove(table, query) {
+  const key = getApiKey();
+  const url = `${BASE_URL}/${table}${query ? '?' + query : ''}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        Accept: 'application/json',
+        Prefer: 'return=representation',
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new RestError('PGW_DOWN', (e && e.message) || '网络请求失败', String((e && e.cause) || ''));
+  }
+
+  const text = await res.text().catch(() => '');
+  if (!res.ok) {
+    const detail = `HTTP ${res.status} ${text.slice(0, 200)}`;
+    const code = (res.status === 401 || res.status === 403 || res.status >= 500) ? 'PGW_DOWN' : 'PGW_BUG';
+    throw new RestError(code, `PostgREST HTTP ${res.status}`, detail);
+  }
+
+  let parsed = [];
+  try {
+    parsed = JSON.parse(text);
+  } catch (e) {
+    parsed = [];
+  }
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+module.exports = { get, insert, update, remove, RestError };

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>接口检查台 · Day 22</title>
+<style>
+  /* 设计令牌沿用index.html / concept.html 的同一套（PRD §5.5） */
+  :root {
+    --accent: #2f6fed;
+    --accent-text: #2560d8;
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --fg-muted: #5b6570;
+    --line: #e3e7ec;
+    --danger: #c0392b;
+    --danger-text: #a5281a;
+    --ok: #1a7f4b;
+    --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+    --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: var(--sp-6);
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.7 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 var(--sp-2); }
+  .sub { color: var(--fg-muted); font-size: 14px; margin-bottom: var(--sp-6); }
+  .card {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: var(--sp-5); margin-bottom: var(--sp-5);
+  }
+  .card h2 { font-size: 17px; margin: 0 0 var(--sp-3); }
+  .row { display: flex; gap: var(--sp-3); align-items: flex-start; flex-wrap: wrap; }
+  .grow { flex: 1 1 220px; min-width: 0; }
+  input[type=text] {
+    width: 100%; padding: 9px 12px; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 6px; font-family: inherit;
+  }
+  input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    padding: 9px 16px; font-size: 14px; font-family: inherit; cursor: pointer;
+    border: 1px solid var(--accent); border-radius: 6px;
+    background: var(--accent); color: #fff;
+  }
+  button:hover { background: #2559c9; border-color: #2559c9; }
+  button.ghost { background: #fff; color: var(--accent-text); }
+  button.ghost:hover { background: #eef3fe; border-color: var(--accent); }
+  button.danger { background: #fff; color: var(--danger-text); border-color: #e3b8b2; }
+  button.danger:hover { background: #fdf1ef; border-color: var(--danger); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: var(--sp-3) var(--sp-2); border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { color: var(--fg-muted); font-weight: 600; font-size: 13px; }
+  td.id { font-family: ui-monospace, Consolas, monospace; color: var(--fg-muted); }
+  /* 状态区：一眼能看出这次操作到底成没成 */
+  .status { margin-top: var(--sp-3); padding: var(--sp-3); border-radius: 6px; font-size: 14px; display: none; }
+  .status.show { display: block; }
+  .status.ok { background: #eaf6ef; color: var(--ok); }
+  .status.err { background: #fdf1ef; color: var(--danger-text); }
+  .status code { font-family: ui-monospace, Consolas, monospace; }
+  /* 二次确认对话框（清单硬要求：删除前必须确认） */
+  .mask {
+    display: none; position: fixed; inset: 0; z-index: 9;
+    background: rgba(20,24,30,.45); align-items: center; justify-content: center; padding: var(--sp-4);
+  }
+  .mask.show { display: flex; }
+  .dialog {
+    background: #fff; border-radius: var(--radius); padding: var(--sp-6);
+    max-width: 420px; width: 100%;
+  }
+  .dialog h3 { margin: 0 0 var(--sp-3); font-size: 17px; }
+  .dialog p { margin: 0 0 var(--sp-5); color: var(--fg-muted); font-size: 14px; }
+  .dialog .acts { display: flex; gap: var(--sp-3); justify-content: flex-end; }
+  .tip { font-size: 13px; color: var(--fg-muted); margin-top: var(--sp-3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>接口检查台</h1>
+  <p class="sub">
+    Day 22 · 用于对 <code>PATCH /api/favorites/{id}</code> 与 <code>DELETE /api/favorites/{id}</code>
+    做真实操作。数据直接落在云数据库，不是内存假象。
+  </p>
+
+  <!-- 改备注 -->
+  <div class="card">
+    <h2>① 改备注（PATCH）</h2>
+    <div class="row">
+      <div class="grow"><input type="text" id="patchId" placeholder="收藏 id，例如 14" /></div>
+      <div class="grow"><input type="text" id="patchNote" placeholder="新备注，例如 测试-改" /></div>
+      <button id="btnPatch">保存修改</button>
+    </div>
+    <div class="status" id="patchStatus"></div>
+    <p class="tip">只允许改备注。填其他字段会被接口拒掉（这是有意的防呆）。</p>
+  </div>
+
+  <!-- 删一条 -->
+  <div class="card">
+    <h2>② 删一条（DELETE）</h2>
+    <div class="row">
+      <div class="grow"><input type="text" id="delId" placeholder="收藏 id，例如 18" /></div>
+      <button class="danger" id="btnDel">删除这条收藏</button>
+    </div>
+    <div class="status" id="delStatus"></div>
+    <p class="tip">删除不可撤销，点下去会先弹确认框。</p>
+  </div>
+
+  <!-- 收藏列表 -->
+  <div class="card">
+    <h2>③ 当前收藏（GET 读回）</h2>
+    <div class="row" style="margin-bottom:var(--sp-3)">
+      <button class="ghost" id="btnReload">刷新列表</button>
+    </div>
+    <table>
+      <thead><tr><th>id</th><th>概念</th><th>备注</th><th>收藏时间</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="4" style="color:var(--fg-muted)">读取中…</td></tr></tbody>
+    </table>
+    <div class="status" id="listStatus"></div>
+  </div>
+</div>
+
+<!-- 二次确认对话框 -->
+<div class="mask" id="mask">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
+    <h3 id="dlgTitle">确认删除这条收藏？</h3>
+    <p id="dlgBody">删除后不可恢复。</p>
+    <div class="acts">
+      <button class="ghost" id="btnCancel">取消</button>
+      <button class="danger" id="btnConfirm">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// API 基址与concepts.js 保持同一处口径
+var API_BASE = 'https://ai-concept-daily-d2ex3o18b05e6dd-1498895639.ap-shanghai.app.tcloudbase.com';
+
+function showStatus(el, ok, text) {
+  el.className = 'status show ' + (ok ? 'ok' : 'err');
+  el.innerHTML = text;
+}
+
+// 统一解析 { ok, data, error }：失败时把中文 message 直接显示出来（这是接口设计的意义所在）
+function handle(el, res, okText) {
+  if (res.ok) { showStatus(el, true, okText(res.data)); }
+  else { showStatus(el, false, '失败：<code>' + res.error.code + '</code> —— ' + res.error.message); }
+}
+
+// ---------- ① PATCH ----------
+document.getElementById('btnPatch').addEventListener('click', function () {
+  var el = document.getElementById('patchStatus');
+  var id = document.getElementById('patchId').value.trim();
+  var note = document.getElementById('patchNote').value;
+  fetch(API_BASE + '/api/favorites/' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note: note })
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      handle(el, res, function (d) {
+        return '修改成功：id ' + d.id + '（' + d.slug + '）备注已改为「' + (d.note === null ? '空' : d.note) + '」';
+      });
+      if (res.ok) loadList();
+    })
+    .catch(function () { showStatus(el, false, '请求没能送达接口（跨域或断网）'); });
+});
+
+// ---------- ② DELETE（带二次确认）----------
+var pendingId = null;
+var mask = document.getElementById('mask');
+
+document.getElementById('btnDel').addEventListener('click', function () {
+  var id = document.getElementById('delId').value.trim();
+  if (!id) {
+    showStatus(document.getElementById('delStatus'), false, '请先填写要删除的收藏 id');
+    return;
+  }
+  pendingId = id;
+  document.getElementById('dlgBody').textContent = '即将删除 id = ' + id + ' 的收藏。删除后不可恢复。';
+  mask.classList.add('show');
+});
+document.getElementById('btnCancel').addEventListener('click', function () {
+  mask.classList.remove('show');
+  pendingId = null;
+});
+document.getElementById('btnConfirm').addEventListener('click', function () {
+  mask.classList.remove('show');
+  var el = document.getElementById('delStatus');
+  var id = pendingId;
+  pendingId = null;
+  if (!id) return;
+  fetch(API_BASE + '/api/favorites/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      handle(el, res, function (d) { return '已删除：id ' + d.id + '（' + d.slug + '），列表里已不再出现'; });
+      if (res.ok) loadList();
+    })
+    .catch(function () { showStatus(el, false, '请求没能送达接口（跨域或断网）'); });
+});
+
+// ---------- ③ 列表 ----------
+function loadList() {
+  var tbody = document.getElementById('rows');
+  var st = document.getElementById('listStatus');
+  fetch(API_BASE + '/api/favorites')
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (!res.ok) {
+        tbody.innerHTML = '<tr><td colspan="4" style="color:var(--danger-text)">读取失败</td></tr>';
+        showStatus(st, false, '<code>' + res.error.code + '</code> —— ' + res.error.message);
+        return;
+      }
+      var items = res.data.items;
+      st.className = 'status';
+      st.textContent = '';
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg-muted)">还没有收藏</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.map(function (it) {
+        return '<tr>'
+          + '<td class="id">' + it.id + '</td>'
+          + '<td>' + it.slug + '</td>'
+          + '<td>' + (it.note === null ? '<span style="color:var(--fg-muted)">（空）</span>' : it.note) + '</td>'
+          + '<td class="id">' + it.createdAt + '</td>'
+          + '</tr>';
+      }).join('');
+    })
+    .catch(function () {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--danger-text)">请求没能送达接口</td></tr>';
+    });
+}
+
+document.getElementById('btnReload').addEventListener('click', loadList);
+loadList();
+</script>
+</body>
+</html>

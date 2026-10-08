@@ -1,16 +1,17 @@
 # API 契约（api-contract.md）
 
-> **文档性质：接口契约（Day 15 登记；Day 17 实现读接口；Day 18 新增第一个写接口；Day 19 补收藏读回接口）。**
+> **文档性质：接口契约（Day 15 登记；Day 17 实现读接口；Day 18 新增第一个写接口；Day 19 补收藏读回接口；Day 22 补改 / 删接口）。**
 > 本文是前后端之间的"合同"：前端按这里的形状写解析逻辑，后端按这里的形状实现。
 > 契约口径已于 2026-09-30 拍板为**方案 A**：只登记本项目自己的接口（依据 `TECH_DESIGN.md` §5.2）。
 > 「今日热搜」模板里的 `/api/hot`、`/api/sync` 等接口**不属于本项目**，未登记（理由见 §5）。
 >
-> - 版本：v0.5 · 日期：2026-10-04
+> - 版本：v0.6 · 日期：2026-10-08
+> - 修订记录：**v0.6（2026-10-08，Day 22）** —— 新增 §4.6 `PATCH /api/favorites/{id}`（只改备注）、§4.7 `DELETE /api/favorites/{id}`（删一条）。至此本项目「增删改查」四类操作齐备（查 = 4 个 GET，增 = POST Day 18，改 / 删 = 今天）。同步修改 `PRD.md` §1.4 变更记录与 `TECH_DESIGN.md` §9.5 的例外口径；§1 路由表说明**复用既有 `/api/favorites` 前缀路由、未新建网关路由**；§4.4 要点第 4 条改为「四类操作已齐」；§5 变更表去掉 PATCH/DELETE 条目；§7 自检表补两列。**新增 5 个错误码**（`FAVORITE_NOT_FOUND` / `INVALID_ID` / `MISSING_NOTE` / `PATCH_INVALID_FIELD` / `PATCH_FIELD_NOT_ALLOWED`）——拆码原因见 §3脚注。
 > - 修订记录：**v0.5（2026-10-04，Day 19）** —— 新增 §4.5 `GET /api/favorites`（收藏列表读回）。属需求变更：§4.4 原写「本期不做 `GET /api/favorites`」，但 Day 19 清单明确要求「写入后再调一次读取接口确认新数据能被读出来」，**读写闭环必须有读接口才能成立**，故登记。同步修改 `PRD.md` §1.4 变更记录与 `TECH_DESIGN.md` §9.5 的例外口径；§1 路由表补 GET 说明；§4.4 要点第 4 条改为「GET 见 §4.5，PATCH/DELETE 仍不做」；§7 自检加一列；**无新增错误码**（复用 `DB_UNAVAILABLE` / `INTERNAL_ERROR`）。
 > - 修订记录：**v0.4（2026-10-03，Day 18）** —— 新增 §4.4 `POST /api/favorites`（本项目**第一个写接口**，属需求变更：原 PRD §1.4 把「收藏」列为刻意排除、§5.4 声明「无持久化」，Day 11 已做收藏前端交互，Day 18 提前做持久化，故同步修改 PRD 与 `TECH_DESIGN` §9.5）；§3 码表补 4 个收藏错误码；§1 路由表补 `/api/favorites`；§5 原「不做 favorites」条目改为变更说明。
-> - 修订记录：**v0.3（2026-10-02，Day 17）** —— §4.2 / §4.3 由「未实现」标记为「已实现」并登记实测结论；修正 §1 生产 Base URL 笔误（`1498985639` → `1498895639`，数字顺序错误）；§3 码表补 `NOT_FOUND`（404 兜底，2026-10-02 拍板登记）。
+> - 修订记录：**v0.3（2026-10-02，Day 17）** —— §4.2 / §4.3 由「未实现」标记为「已实现」并登记实测结论；修正 §1 生产 Base URL笔误（`1498985639` → `1498895639`，数字顺序错误）；§3 码表补 `NOT_FOUND`（404 兜底，2026-10-02 拍板登记）。
 > - 修订记录：**v0.2（2026-10-02，Day 17 拍板 2A）** —— §4.3 的 `useCases[].text` 改为 `useCases[].content`、`sources[].title` 改为 `sources[].label`，与数据库列名（`concept_use_cases.content` / `concept_sources.label`）及 `concepts.js` 键名对齐。
-> - 契约状态：读接口 4 个（`GET /api/health`、`GET /api/concepts`、`GET /api/concepts/{slug}` Day 17 实现并公网验证，54/54 项形状比对通过；`GET /api/favorites` **Day 19 实现并验证**）；写接口 1 个（`POST /api/favorites`）**Day 18 实现并验证**。
+> - 契约状态：**读接口 4 个全部已实现并验证**；**写接口 3 个全部已实现并验证**（`POST /api/favorites` Day 18、`GET /api/favorites` Day 19、`PATCH` + `DELETE /api/favorites/{id}` Day 22）。Day 22 实测：本地沙箱 21/21 通过，线上 curl 11 条用例全对，真实 Chrome 操作 6 个场景全对，数据库 select 前后对比确认真落库。
 
 ---
 
@@ -19,7 +20,7 @@
 | 项 | 值 | 说明 |
 |---|---|---|
 | 生产 Base URL | `https://ai-concept-daily-d2ex3o18b05e6dd-1498895639.ap-shanghai.app.tcloudbase.com` | CloudBase HTTP 访问服务的默认域名（API 网关），**只服务接口，不服务页面**（v0.3 修正笔误） |
-| 已挂路由 | `/api/health` → 云函数 `api`<br>`/api/concepts` → 云函数 `api`（前缀覆盖 `/api/concepts/{slug}`）<br>`/api/favorites` → 云函数 `api`（Day 18 新增） | 三条路由均开启路径透传（`enablePathTransmission=true`）；**路由不带方法限制，方法由云函数内部判定**——故 Day 19 新增 `GET /api/favorites` **不需要新建网关路由**，与 `POST /api/favorites` 共用既有那一条 |
+| 已挂路由 | `/api/health` → 云函数 `api`<br>`/api/concepts` → 云函数 `api`（前缀覆盖 `/api/concepts/{slug}`）<br>`/api/favorites` → 云函数 `api`（Day 18 新增；**前缀已覆盖 `/api/favorites/{id}`**，Day 22 的 PATCH / DELETE 未新建路由） | 三条路由均开启路径透传（`enablePathTransmission=true`）；**路由不带方法限制，方法由云函数内部判定**——故 `GET /api/favorites`（Day 19）与 `PATCH`/`DELETE /api/favorites/{id}`（Day 22）**都不需要新建网关路由**，全部共用既有那一条。Day 22 实测确认网关会把 PATCH / DELETE 透传到函数（未部署前探到的是本函数的 404 兜底，不是网关拒绝） |
 | 计划路由 | ~~`/api` → 同一个云函数 `api`~~（Day 17 实际按接口各挂一条前缀路由，见上） | 按 `TECH_DESIGN.md` 方案 B1，所有接口由这一个函数承载 |
 | 前端调用方式 | 相对路径或 `VITE_API_BASE_URL` | `TECH_DESIGN.md` §8.2；若两服务不同域，会触发跨域——**本期不处理**（见 §6） |
 
@@ -56,8 +57,18 @@
 | `INVALID_FIELD` | 400 | 字段类型不对（如 `slug` 传了数字/数组/对象） | 收藏的内容格式不对 |
 | `FIELD_TOO_LONG` | 400 | 字段超过长度上限（`slug` > 64 或 `note` > 200 字符） | 备注最多 200 字 |
 | `DUPLICATE_FAVORITE` | 409 | 该概念已在收藏中 | 这个概念你已经收藏过了 |
+| `FAVORITE_NOT_FOUND` | 404 | PATCH / DELETE 的 `id` 在库里查不到 | 这条收藏已经不在了 |
+| `INVALID_ID` | 400 | 路径 `id` 不是正整数（字母 / 负数 / 0 / 小数 / 空） | 收藏编号不对，请刷新页面重试 |
+| `MISSING_NOTE` | 400 | PATCH 请求体缺 `note` | 请填写要改的备注内容 |
+| `PATCH_INVALID_FIELD` | 400 | PATCH 的 `note` 不是字符串 | 备注格式不对，只能是文字 |
+| `PATCH_FIELD_NOT_ALLOWED` | 400 | PATCH 带了 `note` 以外的字段 | 只能改备注，其他内容不能改 |
 
 > 后 4 个码为 Day 18 新增（第一批写接口专属）；`CONCEPT_NOT_FOUND`、`DB_UNAVAILABLE`、`INTERNAL_ERROR` 读写共用。
+>
+> **⚠️ 为什么 Day 22 又拆了 3 个码（v0.6）**：原先打算让 PATCH 复用 `MISSING_FIELD` / `INVALID_FIELD`，实测发现这两个码的 `message` 是**写死了 POST 场景**的人话—— PATCH 缺 `note` 时会弹出「请指定要收藏的概念」，改备注却提示"要收藏的概念"，用户完全看不懂。契约硬规则 §2 第1 条要求 `message` 说人话，**说错场景的话比不说更糟**，故拆出 `MISSING_NOTE` / `PATCH_INVALID_FIELD` / `PATCH_FIELD_NOT_ALLOWED` 三个 PATCH 专属码。
+> `INVALID_FIELD`（`收藏的内容格式不对`）保留给 POST 用，语义未变。
+>
+> **防呆口径（Day 22 确立）**：改 / 删**不先查后写**，而是靠 PostgREST 的 `Prefer: return=representation` 回填行数判断——回填 0 行即这个 `id` 不存在，直接回 `FAVORITE_NOT_FOUND`。**绝不允许对不存在的 id 返回成功**（清单「防呆检测」点名要修的就是这个）。
 
 ---
 
@@ -173,7 +184,7 @@
 > 1. **防重复**：同一概念重复收藏返回 `DUPLICATE_FAVORITE`(409)，**不写入第二行**；数据库上以 `favorites.concept_id` 的 `UNIQUE` 约束兜底，云函数捕获唯一冲突后转成该业务码。
 > 2. **响应回 `slug` 不回 `concept_id`**：内部主键不外泄，前端只认 `slug`。
 > 3. `slug` 在 `concepts` 表查不到 → `CONCEPT_NOT_FOUND`(404)，与 §4.3 复用同一个码。
-> 4. 本组接口**不做**：`PATCH`/`DELETE /api/favorites`（属第 4 周）、批量写入、收藏列表分页。`GET /api/favorites` 已于 Day 19 登记为 §4.5（原 v0.4 的「本期不做 GET」按需求变更改口径，理由见文首修订记录）。
+> 4. 本组接口**不做**：批量写入、收藏列表分页。**四类操作的现状**（Day 22）：`POST` 见本文、`GET` 见 §4.5、`PATCH` 见 §4.6、`DELETE` 见 §4.7 —— 增删改查已齐，**批量操作仍未做**（PRD §1.4 明确不做）。
 
 ### 4.5 `GET /api/favorites` —— 收藏列表（写后读回） ✅ 已实现（Day 19）
 
@@ -209,6 +220,78 @@
 > 4. `createdAt` 统一为 UTC 的 ISO 8601（`…Z`），处理方式同 §4.4（PostgREST 原样回的是 `+08:00` 偏移 + 5 位小数秒，服务端显式转换）。
 > 5. 空表时回 `{ "items": [], "count": 0 }`，**不是错误**（前端渲染空态）。
 
+### 4.6 `PATCH /api/favorites/{id}` —— 修改收藏备注 ✅ 已实现（Day 22，公网验证通过）
+
+| 项 | 内容 |
+|---|---|
+| 用途 | 改一条已存在收藏的**备注**。至此「增（POST）→ 查（GET）→ 改（PATCH）→ 删（DELETE）」四类操作齐备 |
+| 请求头 | `Content-Type: application/json` |
+| 请求体 | `{ "note": "新的备注" }` —— **只允许这一个字段** |
+| 成功响应 | `200`，`data` 形状 = 被改完的那一行（与 §4.5 `items[]` 元素同构，见下方 JSON） |
+| 错误响应 | `INVALID_ID`(400) / `MISSING_NOTE`(400) / `PATCH_INVALID_FIELD`(400) / `PATCH_FIELD_NOT_ALLOWED`(400) / `FIELD_TOO_LONG`(400) / `FAVORITE_NOT_FOUND`(404) / `DB_UNAVAILABLE`(503) / `INTERNAL_ERROR`(500) |
+
+```json
+// PATCH /api/favorites/14   {"note":"测试-改"}
+{
+  "ok": true,
+  "data": { "id": 14, "slug": "003-prompt", "note": "测试-改", "createdAt": "2026-10-06T10:57:00.483Z" },
+  "error": null
+}
+
+// PATCH /api/favorites/99999（不存在的 id）
+{
+  "ok": false,
+  "data": null,
+  "error": { "code": "FAVORITE_NOT_FOUND", "message": "这条收藏已经不在了" }
+}
+```
+
+**字段规则**：
+
+| 字段 | 必填 | 类型 | 长度上限 | 说明 |
+|---|---|---|---|---|
+| 路径参数 `id` | 是 | 正整数 | — | 非正整数 → `INVALID_ID`(400) |
+| `note` | **是** | string | ≤ 200 字符 | 缺失 → `MISSING_NOTE`；非字符串 → `PATCH_INVALID_FIELD`；超长 → `FIELD_TOO_LONG` |
+
+> 要点：
+> 1. **只允许改 `note`**：传了别的字段 → `PATCH_FIELD_NOT_ALLOWED`(400)，**不静默忽略**。`slug` 指向哪个概念属于这条收藏的身份，改了等于换成另一条收藏；`concept_id` 是外键，更不该从接口层动。**想换收藏对象 = 删掉再收藏。**
+> 2. **`note` 必须出现，但可以是空串**：`""` 视为「明确清空备注」，落库成 `null`（与 §4.5 回 `null` 的口径对齐）。这样区分得清「不想改备注」与「想把备注清空」。
+> 3. **成功响应直接回改完的那一行**，前端可本地替换该行显示，不必再 GET 一次对账。
+> 4. **不存在就报 404，绝不报成功**：靠数据层回填行数判断（见 §3 防呆口径）。已实测：PATCH 99999 → 404，且数据库该行**未被动过**。
+> 5. 本接口**不做**：改 `slug` / 改 `concept_id`、批量 PATCH（一次改多条）、部分字段的深合并（整体替换 `note`，不做 JSON Patch）。
+
+### 4.7 `DELETE /api/favorites/{id}` —— 删除一条收藏 ✅ 已实现（Day 22，公网验证通过）
+
+| 项 | 内容 |
+|---|---|
+| 用途 | 删掉一条收藏。补上 Day 18/19 遗留的最后一块——**没有删除，收藏就只能加不能减** |
+| 请求参数 | **路径参数** `id`，正整数；**不需要请求体**（删除没有参数可传，带了也是忽略，反而误导） |
+| 成功响应 | `200`，`data` = **被删掉的那一行**（前端可直接把这一行从列表里去掉，不必再 GET 对账） |
+| 错误响应 | `INVALID_ID`(400) / `FAVORITE_NOT_FOUND`(404) / `DB_UNAVAILABLE`(503) / `INTERNAL_ERROR`(500) |
+
+```json
+// DELETE /api/favorites/17
+{
+  "ok": true,
+  "data": { "id": 17, "slug": "005-attention", "note": null, "createdAt": "2026-10-06T10:59:04.294Z" },
+  "error": null
+}
+
+// DELETE /api/favorites/17（第二次删同一条 —— 关键：不能报成功）
+{
+  "ok": false,
+  "data": null,
+  "error": { "code": "FAVORITE_NOT_FOUND", "message": "这条收藏已经不在了" }
+}
+```
+
+> 要点：
+> 1. **重复删必须报错**（`FAVORITE_NOT_FOUND` 404），不是返回"删除成功"。这是 `favorites.id` 主键 + 回填行数的直接结果，已实测。
+> 2. **成功回 200 而不是 204**：因为要回「被删掉的那一行」，让前端不必再对账。空body 的 204 在这里反而更麻烦。
+> 3. **前端必须做二次确认**（Day 22 已在 `console.html` 落地）：删除不可撤销，误点代价高。已实测「点取消 → 数据仍在」「点确认 → 真消失」。
+> 4. 外键均为 `ON DELETE CASCADE`，但 `favorites` 是叶子表（没有子表引用它），删它不会牵连其他表。
+> 5. 本期**不做**：批量删除（一次删多条）、按 `slug` 删（对外一律用 `id`，与 §4.5 列表返回的字段一致）、回收站 / 撤销删除。
+
 ---
 
 ## 5. 明确不登记的接口 / 变更说明
@@ -218,10 +301,12 @@
 | 不登记 | 理由 |
 |---|---|
 | `GET /api/hot`（热搜列表）、`POST /api/sync`（同步热搜） | 这是「今日热搜」项目的接口；本项目是概念词典，没有"热搜"概念 |
-| `PATCH` / `DELETE /api/favorites` | 属第 4 周；`POST` 见 §4.4（Day 18）、`GET` 见 §4.5（Day 19） |
+| ~~`PATCH` / `DELETE /api/favorites`~~ | **已于 Day 22 登记**（§4.6 / §4.7）——「不登记」表里已划掉这一行 |
 | 登录/注册、搜索、分页、埋点 | `PRD §1.4` 明确不做 |
 
 > **⚠️ 变更说明（Day 18，2026-10-03）**：本表原有一条「`GET/POST /api/favorites`、`PATCH/DELETE /api/favorites/:id` —— 本项目**任何写接口都不做**」。按训练营 Day 18 进度，**收藏持久化提前到今天**：这属于需求变更，故已同步修改 `PRD.md` §1.4 / §5.4 与 `TECH_DESIGN.md` §9.5 的排除口径，随后登记 §4.4。**变更纪律不变**：今后若要再加写接口，仍须先改 PRD、再改本文。
+>
+> **⚠️ 变更说明（Day 22，2026-10-08）**：Day 19 结束时本表还挂着「`PATCH`/`DELETE /api/favorites`属第 4 周」。Day 22 清单要求「补齐修改和删除接口，**数据操作闭环完整**」——只有增和读，收藏只能加不能减、备注写错也改不了。故登记 §4.6 / §4.7，同时在 `PRD.md` §1.4 变更记录与 `TECH_DESIGN.md` §9.5 例外口径同步补一行。**新增 5 个错误码**（`FAVORITE_NOT_FOUND` / `INVALID_ID` / `MISSING_NOTE` / `PATCH_INVALID_FIELD` / `PATCH_FIELD_NOT_ALLOWED`，拆码理由见 §3）、**未新建网关路由**（复用既有 `/api/favorites` 前缀路由）、**未做批量操作**（清单「今日不做」明确排除）。
 >
 > **⚠️ 变更说明（Day 19，2026-10-04）**：§4.4 原第 4 条写「本期不做 `GET /api/favorites`」。Day 19 清单要求「写入后再调一次读取接口（`GET /api/favorites`），确认新写入的数据能被读出来」——**没有读接口，读写闭环就只是半条**。故把该条改为「`GET` 属本期（§4.5），`PATCH`/`DELETE` 仍属第 4 周」，同步在 `PRD.md` §1.4 变更记录补一行、`TECH_DESIGN.md` §9.5 例外口径补读接口。**未新增错误码、未新增网关路由。**
 
@@ -238,15 +323,17 @@
 
 ## 7. 契约完整性自检（对照今日"契约完整性检测"标准）
 
-| 检查项 | 4.1 health | 4.2 concepts | 4.3 concepts/{slug} | 4.4 POST favorites | 4.5 GET favorites |
-|---|---|---|---|---|---|
-| 路径 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 方法 | ✅ GET | ✅ GET | ✅ GET | ✅ POST | ✅ GET |
-| 请求参数 | ✅（无） | ✅（无） | ✅（路径参数 slug） | ✅（JSON 体 slug/note） | ✅（无） |
-| 响应 JSON 形状 | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 错误形状 | ✅（网关级） | ✅（复用 §3 码表） | ✅（复用 §3 码表） | ✅（§3 码表 + 4 个新码） | ✅（复用 `DB_UNAVAILABLE`/`INTERNAL_ERROR`） |
-| 统一信封 | ✅（含 ok 字段） | ✅ | ✅ | ✅ | ✅ |
+| 检查项 | 4.1 health | 4.2 concepts | 4.3 concepts/{slug} | 4.4 POST favorites | 4.5 GET favorites | 4.6 PATCH favorites/{id} | 4.7 DELETE favorites/{id} |
+|---|---|---|---|---|---|---|---|
+| 路径 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 方法 | ✅ GET | ✅ GET | ✅ GET | ✅ POST | ✅ GET | ✅ PATCH | ✅ DELETE |
+| 请求参数 | ✅（无） | ✅（无） | ✅（路径参数 slug） | ✅（JSON 体 slug/note） | ✅（无） | ✅（路径 id + 体 note） | ✅（路径 id，无体） |
+| 响应 JSON 形状 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 错误形状 | ✅（网关级） | ✅（复用 §3 码表） | ✅（复用 §3 码表） | ✅（§3 码表 + 4 个新码） | ✅（复用 `DB_UNAVAILABLE`/`INTERNAL_ERROR`） | ✅（§3 码表 + 4 个新码） | ✅（§3 码表 + 2 个新码） |
+| 统一信封 | ✅（含 ok 字段） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 防呆（不存在的 id 不报成功） | — | — | ✅（slug → 404） | ✅（重复 → 409） | — | ✅ 实测 404 | ✅ 实测 404（重复删也 404） |
+| 已公网实测 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 2026-10-08 | ✅ 2026-10-08 |
 
 ---
 
-*本文登记契约。Day 17 已实现并验证 3 个读接口；Day 18 新增并实现 `POST /api/favorites`；Day 19 新增并实现 `GET /api/favorites`（读写闭环成立）。依据：`TECH_DESIGN.md` §5.2/§5.3/§5.4、`PRD.md` §1.4/§7、2026-09-30 拍板记录、2026-10-03（Day 18）需求变更拍板、2026-10-04（Day 19）清单第 5 步。*
+*本文登记契约。Day 17 已实现并验证 3 个读接口；Day 18 新增并实现 `POST /api/favorites`；Day 19 新增并实现 `GET /api/favorites`（读写闭环成立）；**Day 22 新增并实现 `PATCH` / `DELETE /api/favorites/{id}`，增删改查四类操作齐备**（详见 `Day22-验证记录.md`）。依据：`TECH_DESIGN.md` §5.2/§5.3/§5.4、`PRD.md` §1.4/§7、2026-09-30 拍板记录、2026-10-03（Day 18）/ 2026-10-04（Day 19）/ 2026-10-08（Day 22）需求变更拍板与清单。*
