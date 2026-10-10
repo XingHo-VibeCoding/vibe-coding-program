@@ -751,7 +751,7 @@ v_published_concepts（视图，在完整视图之上）
 |---|---|---|---|---|---|
 | `VITE_API_BASE_URL` | 前端（构建期） | 否 | `app/.env.local` | 构建时注入（不进控制台） | 云函数 HTTP 触发地址 |
 | `VITE_SITE_TITLE` | 前端 | 否 | `app/.env.local` | 同上 | 站点标题，可选 |
-| `DATABASE_URL` | **仅云函数** | **是** | 根目录 `.env`（本地调试云函数用） | CloudBase 云函数环境变量 | 形如 `postgresql://user:password@host:5432/db` |
+| `DATABASE_URL` | **仅云函数** | **是** | 根目录 `.env`（本地调试云函数用） | CloudBase 云函数环境变量 | 形如 `postgresql://<用户名>@<主机>:5432/db`（密码只写进 .env，不进仓库） |
 | `LLM_API_KEY` | 云函数 | **是** | 根目录 `.env` | CloudBase 云函数环境变量 | **本期不使用**（PRD §1.4 排除 AI 自动生成）；保留占位，勿删 |
 | `PORT` | 云函数本地调试 | 否 | 根目录 `.env` | — | 仅本地用 |
 

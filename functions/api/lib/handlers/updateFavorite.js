@@ -53,7 +53,7 @@ async function updateFavorite(idRaw, body) {
   // 与 POST 同口径：去首尾空白；空串 = 明确清空备注（存成 null，与 GET 回 null 对齐）
   const note = body.note.trim() === '' ? null : body.note.trim();
   if (note !== null && note.length > MAX_NOTE_LEN) {
-    throw new ApiError('FIELD_TOO_LONG', `note 长度 ${note.length}`);
+    throw new ApiError('NOTE_TOO_LONG', `note 长度 ${note.length}`);
   }
 
   const result = await updateFavoriteNote(id, note);

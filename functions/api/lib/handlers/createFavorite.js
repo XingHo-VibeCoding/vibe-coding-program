@@ -32,7 +32,7 @@ function normalizeSlug(raw) {
   }
   const slug = raw.trim().toLowerCase();
   if (slug === '') throw new ApiError('MISSING_FIELD', 'slug 为空白');
-  if (slug.length > MAX_SLUG_LEN) throw new ApiError('FIELD_TOO_LONG', `slug 长度 ${slug.length}`);
+  if (slug.length > MAX_SLUG_LEN) throw new ApiError('SLUG_TOO_LONG', `slug 长度 ${slug.length}`);
   return slug;
 }
 
@@ -44,7 +44,7 @@ function normalizeNote(raw) {
   }
   const note = raw.trim();
   if (note === '') return null;
-  if (note.length > MAX_NOTE_LEN) throw new ApiError('FIELD_TOO_LONG', `note 长度 ${note.length}`);
+  if (note.length > MAX_NOTE_LEN) throw new ApiError('NOTE_TOO_LONG', `note 长度 ${note.length}`);
   return note;
 }
 

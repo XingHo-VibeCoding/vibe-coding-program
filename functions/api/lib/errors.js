@@ -14,8 +14,14 @@ const TABLE = {
   // ---- Day 18 新增：写接口（POST /api/favorites）专属（api-contract v0.4 §3）----
   MISSING_FIELD: { status: 400, message: '请指定要收藏的概念' },
   INVALID_FIELD: { status: 400, message: '收藏的内容格式不对' },
-  FIELD_TOO_LONG: { status: 400, message: '备注最多 200 字' },
   DUPLICATE_FAVORITE: { status: 409, message: '这个概念你已经收藏过了' },
+
+  // ---- Day 23 新增：超长提示按字段拆开 ----
+  // Day 23 审计发现：原先 FIELD_TOO_LONG 的 message 写死「备注最多 200 字」，
+  // 但slug 也有长度上限（64），实测「slug 超长」也回这一句 ——
+  // 提示与实际被拒的字段不符，等于说错话。按字段拆成两个码。
+  NOTE_TOO_LONG: { status: 400, message: '备注最多 200 字' },
+  SLUG_TOO_LONG: { status: 400, message: '概念编号格式不对' },
 
   // ---- Day 22 新增：改 / 删接口（PATCH、DELETE /api/favorites/{id}）专属（api-contract v0.6 §3）----
   FAVORITE_NOT_FOUND: { status: 404, message: '这条收藏已经不在了' },

@@ -139,15 +139,151 @@
 // API 基址与concepts.js 保持同一处口径
 var API_BASE = 'https://ai-concept-daily-d2ex3o18b05e6dd-1498895639.ap-shanghai.app.tcloudbase.com';
 
-function showStatus(el, ok, text) {
-  el.className = 'status show ' + (ok ? 'ok' : 'err');
-  el.innerHTML = text;
+// ==========================================================================
+// Day 23 新增：错误三分类 + HTML 转义 + 输入校验
+//
+// 为什么加：Day 22 版本把后端的 error.code 原样印在页面上（如
+// <code>PATCH_FIELD_NOT_ALLOWED</code>），把「请求没能送达接口」的 err
+// 整个丢掉。这两处都不是给人看的 —— 前者是工程术语，后者让线上排障
+// 毫无线索。本节按「用户输入错 / 网络接口错 / 服务端错」三类统一出口。
+// ==========================================================================
+
+/** ① HTML 转义：数据库里的 note 是用户自己写进去的，直接 innerHTML 会执行脚本 */
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-// 统一解析 { ok, data, error }：失败时把中文 message 直接显示出来（这是接口设计的意义所在）
-function handle(el, res, okText) {
-  if (res.ok) { showStatus(el, true, okText(res.data)); }
-  else { showStatus(el, false, '失败：<code>' + res.error.code + '</code> —— ' + res.error.message); }
+/**
+ * 错误码 → 分类。三类的处置口径固定不变：
+ *   input   用户输入错 → 告诉他**改什么**（能自己解决）
+ *   net     网络/接口错 → 提示**稍后再试**（不是他的错）
+ *   server  服务端错 → **console 记日志** + 通用提示（我们的错，不该让他看细节）
+ */
+var ERR_KIND = {
+  MISSING_SLUG: 'input', CONCEPT_NOT_FOUND: 'input',
+  MISSING_FIELD: 'input', INVALID_FIELD: 'input',
+  NOTE_TOO_LONG: 'input', SLUG_TOO_LONG: 'input',
+  MISSING_NOTE: 'input', PATCH_INVALID_FIELD: 'input', PATCH_FIELD_NOT_ALLOWED: 'input',
+  INVALID_ID: 'input', DUPLICATE_FAVORITE: 'input',
+  FAVORITE_NOT_FOUND: 'input',
+  DB_UNAVAILABLE: 'net',
+  NOT_FOUND: 'net',
+  INTERNAL_ERROR: 'server'
+};
+
+/** 兜底文案：后端没给 code、或 code 不在表里时，按 HTTP 状态猜类别 */
+function kindOf(code, httpStatus) {
+  if (code && ERR_KIND[code]) return ERR_KIND[code];
+  /* status 为 0 表示请求根本没送达（断网 / DNS / 跨域被拦）——
+     这是**网络错**，不是服务端错。Day 23 首轮截图实测发现的分类错误：
+     从 file:// 打开本页时列表加载失败，被误显示成「服务出错了」。 */
+  if (!httpStatus) return 'net';
+  if (httpStatus === 400 || httpStatus === 409) return 'input';
+  if (httpStatus === 404 || httpStatus === 502 || httpStatus === 503 || httpStatus === 504) return 'net';
+  return 'server';
+}
+
+/** 三类各自的收尾话术。userMsg 是后端给的中文人话，优先用它（它最贴场景） */
+var KIND_TIP = {
+  input: '',
+  net: '这是网络或接口的问题，不用改你填的内容，等一会儿再试一次就行。',
+  server: '这是我们这边的问题，已经记下日志了。请稍后再试。'
+};
+
+/**
+ * 唯一错误出口：把后端信封 / fetch 异常统一转成「分类 + 中文提示」。
+ * @param {string} code后端错误码（可能为空）
+ * @param {number} status HTTP 状态码（可能为 0，表示请求没送达）
+ * @param {string} userMsg 后端给的中文 message
+ * @param {Error} [rawErr] 原始异常，只进 console，不进提示
+ */
+function presentError(code, status, userMsg, rawErr) {
+  var kind = kindOf(code, status);
+  var text = (userMsg || '').trim();
+  /* 输入错：后端的话就是「改什么」，直接用，不加尾巴让它更长。
+     另外两类要补一句「接下来怎么办」，否则用户只看到失败、不知道怎么办。*/
+  if (kind !== 'input') {
+    text = text ? text + ' ' + KIND_TIP[kind] : KIND_TIP[kind];
+  }
+  /* 服务端错：细节只进日志，绝不进提示（api-contract §2 纪律） */
+  if (kind === 'server') {
+    console.error('[console] 服务端错误 code=' + (code || '无') + ' http=' + status, rawErr || '');
+  }
+  return { kind: kind, code: code || '', text: text };
+}
+
+function showStatus(el, ok, html) {
+  el.className = 'status show ' + (ok ? 'ok' : 'err');
+  el.innerHTML = html;
+}
+
+/** 失败提示的统一渲染：正文走 esc()，只有我们自己写的分类标签用标签呈现 */
+function showError(el, p) {
+  var label = { input: '需要你改一下', net: '网络/接口问题', server: '服务出错了' }[p.kind];
+  showStatus(el, false,
+    '<strong>' + esc(label) + '</strong>　' + esc(p.text) +
+    (p.code ? '　<span class="tip">（技术码 ' + esc(p.code) + '，排查用）</span>' : '')
+  );
+}
+
+/** fetch 的网络层失败（断网/ DNS / 跨域被拦）：一律归「网络/接口错」 */
+function onNetFail(el, err) {
+  console.warn('[console] 请求未送达接口', err);
+  showError(el, presentError('', 0, '', err));
+}
+
+/**
+ * 统一发请求：拆信封 → 成功走onOk，失败走 showError。
+ * 这里不直接用 r.json()：网关返回 HTML 错误页时它会抛 SyntaxError，
+ * 那种情况要算「服务端错」，不能混进「网络错」。
+ */
+function callApi(el, url, opts, onOk) {
+  fetch(url, opts)
+    .then(function (r) {
+      return r.text().then(function (t) {
+        var body = null;
+        try { body = t ? JSON.parse(t) : null; }
+        catch (e) {
+          showError(el, presentError('BAD_GATEWAY', r.status, '接口没有返回正常内容，稍后再试一次。', e));
+          return;
+        }
+        if (!body || body.ok !== true) {
+          /* Day 23 审计发现：**网关层错误不走云函数**，信封形状和我们的
+             契约不一样 —— 是 { code:"INVALID_PATH", message:"Invalid path.
+             For more information, please refer to https://docs..." }，
+             全英文、还带一个文档链接。绝不能原样显示给使用者。
+             这里认出这种形状，换成中文「接口地址不存在」。 */
+          if (body && !body.ok && body.code && body.message && !body.error) {
+            console.warn('[console] 网关层错误（非云函数返回）：', body);
+            showError(el, presentError('GW_' + body.code, r.status, '接口地址不存在，请检查访问的地址是否正确。'));
+            return;
+          }
+          var code = (body && body.error && body.error.code) || ('HTTP_' + r.status);
+          var msg = (body && body.error && body.error.message) || '';
+          showError(el, presentError(code, r.status, msg));
+          return;
+        }
+        onOk(body.data);
+      });
+    })
+    .catch(function (err) { onNetFail(el, err); });
+}
+
+/* ---------- 本地输入校验：把「用户输入错」拦在请求之前 ---------- */
+var MAX_NOTE_LEN = 200;   /* 与后端 createFavorite / updateFavorite 的上限一致 */
+
+/** 收藏 id 必须是正整数。返回 null 表示通过，否则返回该报的中文提示 */
+function checkId(raw) {
+  var v = String(raw === null || raw === undefined ? '' : raw).trim();
+  if (v === '') return '请先填写收藏 id（就是列表里那一行的编号）。';
+  if (!/^\d+$/.test(v)) return '收藏 id 只能是数字，例如 14。请把列表里的编号原样填进来。';
+  if (Number(v) <= 0) return '收藏 id 要是大于 0 的数字。';
+  return null;
 }
 
 // ---------- ① PATCH ----------
@@ -155,19 +291,22 @@ document.getElementById('btnPatch').addEventListener('click', function () {
   var el = document.getElementById('patchStatus');
   var id = document.getElementById('patchId').value.trim();
   var note = document.getElementById('patchNote').value;
-  fetch(API_BASE + '/api/favorites/' + encodeURIComponent(id), {
+
+  var bad = checkId(id);
+  if (bad) { showError(el, presentError('INVALID_ID', 0, bad)); return; }
+  if (note.length > MAX_NOTE_LEN) {
+    showError(el, presentError('NOTE_TOO_LONG', 0, '备注最多 ' + MAX_NOTE_LEN + ' 字，现在有 ' + note.length + ' 字，删掉一点再保存。'));
+    return;
+  }
+
+  callApi(el, API_BASE + '/api/favorites/' + encodeURIComponent(id), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ note: note })
-  })
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      handle(el, res, function (d) {
-        return '修改成功：id ' + d.id + '（' + d.slug + '）备注已改为「' + (d.note === null ? '空' : d.note) + '」';
-      });
-      if (res.ok) loadList();
-    })
-    .catch(function () { showStatus(el, false, '请求没能送达接口（跨域或断网）'); });
+  }, function (d) {
+    showStatus(el, true, '修改成功：id ' + esc(d.id) + '（' + esc(d.slug) + '）备注已改为「' + esc(d.note === null ? '空' : d.note) + '」');
+    loadList();
+  });
 });
 
 // ---------- ② DELETE（带二次确认）----------
@@ -176,8 +315,11 @@ var mask = document.getElementById('mask');
 
 document.getElementById('btnDel').addEventListener('click', function () {
   var id = document.getElementById('delId').value.trim();
-  if (!id) {
-    showStatus(document.getElementById('delStatus'), false, '请先填写要删除的收藏 id');
+  var bad = checkId(id);
+  /* 空id / 非数字 id 在这里就被拦下并说清「改什么」，
+     不会再像Day 22 那样发出去后被后端回一句「接口不存在」。 */
+  if (bad) {
+    showError(document.getElementById('delStatus'), presentError('INVALID_ID', 0, bad));
     return;
   }
   pendingId = id;
@@ -194,46 +336,35 @@ document.getElementById('btnConfirm').addEventListener('click', function () {
   var id = pendingId;
   pendingId = null;
   if (!id) return;
-  fetch(API_BASE + '/api/favorites/' + encodeURIComponent(id), { method: 'DELETE' })
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      handle(el, res, function (d) { return '已删除：id ' + d.id + '（' + d.slug + '），列表里已不再出现'; });
-      if (res.ok) loadList();
-    })
-    .catch(function () { showStatus(el, false, '请求没能送达接口（跨域或断网）'); });
+  callApi(el, API_BASE + '/api/favorites/' + encodeURIComponent(id), { method: 'DELETE' }, function (d) {
+    showStatus(el, true, '已删除：id ' + esc(d.id) + '（' + esc(d.slug) + '），列表里已不再出现');
+    loadList();
+  });
 });
 
 // ---------- ③ 列表 ----------
 function loadList() {
   var tbody = document.getElementById('rows');
   var st = document.getElementById('listStatus');
-  fetch(API_BASE + '/api/favorites')
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      if (!res.ok) {
-        tbody.innerHTML = '<tr><td colspan="4" style="color:var(--danger-text)">读取失败</td></tr>';
-        showStatus(st, false, '<code>' + res.error.code + '</code> —— ' + res.error.message);
-        return;
-      }
-      var items = res.data.items;
-      st.className = 'status';
-      st.textContent = '';
-      if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg-muted)">还没有收藏</td></tr>';
-        return;
-      }
-      tbody.innerHTML = items.map(function (it) {
-        return '<tr>'
-          + '<td class="id">' + it.id + '</td>'
-          + '<td>' + it.slug + '</td>'
-          + '<td>' + (it.note === null ? '<span style="color:var(--fg-muted)">（空）</span>' : it.note) + '</td>'
-          + '<td class="id">' + it.createdAt + '</td>'
-          + '</tr>';
-      }).join('');
-    })
-    .catch(function () {
-      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--danger-text)">请求没能送达接口</td></tr>';
-    });
+  callApi(st, API_BASE + '/api/favorites', { headers: { 'Accept': 'application/json' } }, function (d) {
+    var items = d.items;
+    st.className = 'status';
+    st.textContent = '';
+    if (!items.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--fg-muted)">还没有收藏</td></tr>';
+      return;
+    }
+    tbody.innerHTML = items.map(function (it) {
+      /* 三处用户可控字段全部转义：note 是用户写进数据库的原文，
+         不转义的话在这里就是存储型 XSS（Day 23 审计 B1 项）。 */
+      return '<tr>'
+        + '<td class="id">' + esc(it.id) + '</td>'
+        + '<td>' + esc(it.slug) + '</td>'
+        + '<td>' + (it.note === null ? '<span style="color:var(--fg-muted)">（空）</span>' : esc(it.note)) + '</td>'
+        + '<td class="id">' + esc(it.createdAt) + '</td>'
+        + '</tr>';
+    }).join('');
+  });
 }
 
 document.getElementById('btnReload').addEventListener('click', loadList);
