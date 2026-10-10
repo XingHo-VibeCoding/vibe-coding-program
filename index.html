@@ -838,9 +838,18 @@
           fetchFavoriteSlugs(function (slugs) {
             if (!slugs || !slugs.length) return;
             for (var n = 0; n < slugs.length; n++) favState[slugs[n]] = true;
-            /* 重画所有收藏按钮，让已收藏的显示成实心 */
+            /* 重画所有收藏按钮，让已收藏的显示成实心。
+
+               Day 24修复：原来这里对**所有**按钮无差别传 'on'，
+               于是未收藏的卡片也拿到 data-fav-state="on"（蓝底实心星），
+               而 paintFav 内部的文字仍按 favState 判成「收藏」——
+               按钮外观自相矛盾，且视觉上骗人。
+               改成逐个按自己的真实状态重画：已收藏 'on'，其余 'off'。 */
             var btns = listEl.querySelectorAll('.fav-btn');
-            for (var b = 0; b < btns.length; b++) paintFav(btns[b], 'on');
+            for (var b = 0; b < btns.length; b++) {
+              var bs = btns[b].getAttribute('data-slug') || '';
+              paintFav(btns[b], favState[bs] === true ? 'on' : 'off');
+            }
           });
         }
       }, function onListFail(err) {
