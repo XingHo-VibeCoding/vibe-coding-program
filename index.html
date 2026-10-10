@@ -415,7 +415,7 @@
 
     <footer>
       <span>每日一个 AI 概念详解</span>
-      <span>Day 8｜首页主视图（mock 数据版）</span>
+      <span>Day 20｜首页数据来自公网接口</span>
     </footer>
   </div>
 
@@ -481,13 +481,13 @@
       /* ==========================================================================
        * 收藏交互（Day 11）
        * --------------------------------------------------------------------------
-       * 今天只做「前端临时状态」：收藏结果存在内存变量里，刷新页面就回到未收藏。
-       * 不写浏览器存储、不发任何网络请求 —— 与 PRD.md §5.7「不写浏览器存储」一致。
+       * 收藏状态的做法：Day 20 起，先用 fetchFavoriteSlugs()（见 concepts.js 第四节）
+       * 从数据库把已收藏的 slug 读回来填进 favState，点一下则调POST /api/favorites
+       * 真的写进数据库。仍然不写浏览器存储 —— 与 PRD.md §5.7 一致，
+       * 状态来源是数据库，不是 localStorage。
        *
-       * 唯一「假」的地方是 toggleFavoriteMock()（见 concepts.js 第四节）：
-       * 它用 setTimeout 假装「请求在路上」，让「处理中」和「失败」两种状态
-       * 真的能被看到、能被验收。Day 23 接上数据库时把它换成真实请求，
-       * 下面这些逻辑一行都不用改。
+       * 下面的防重复提交、失败回滚、失败提示这几段逻辑从 Day 11 一直没改，
+       * 接真实接口后原样可用 —— 这就是当初把网络调用放在 concepts.js 的价值。
        *
        * 一张卡片上的按钮有 3 个状态（样式见上方 CSS，全部由 data-fav-state 驱动）：
        *   off      未收藏  ← 空心星 + 灰字描边
@@ -495,7 +495,7 @@
        *   pending  处理中  ← 转圈 + 按钮禁用，此期间再点不会重复提交
        * ========================================================================== */
 
-      var favState = {};   // slug -> true   已收藏的编号（只存在内存里，刷新即清空）
+      var favState = {};   // slug -> true   已收藏的编号（Day 20 起：初始值来自数据库读回）
       var inFlight = {};   // slug -> true   正在等回包的编号（防重复提交的第二道闸）
 
       /* 提示条元素与它的收走定时器 */
@@ -590,7 +590,7 @@
         if (inFlight[slug]) return;
 
         /* 数据层没加载成功时，给一句能照做的提示，而不是静默失灵 */
-        if (typeof toggleFavoriteMock !== 'function') {
+        if (typeof toggleFavoriteMock !== 'function' || typeof removeFavoriteMock !== 'function') {
           showToast('收藏功能没有加载出来。请确认 concepts.js 与 index.html 在同一个文件夹，'
                   + '然后刷新页面再试。');
           return;
@@ -600,16 +600,30 @@
         inFlight[slug] = true;
         paintFav(btn, 'pending');
 
-        toggleFavoriteMock(slug, function onDone() {
+        /* Day 24 修复（真 Bug：取消收藏是假成功）。
+           原来不管想收藏还是想取消，一律调 toggleFavoriteMock（只会 POST），
+           取消时 POST 拿到 409 被当成成功 → 界面显示「☆ 收藏」，
+           数据库那一行从未被删，刷新后又变回「★ 已收藏」。
+           现在按意图分流：取消走 removeFavoriteMock（DELETE /api/favorites/{id}）。
+           函数名保持不变，onDone 的参数形状也仍是布尔「是否已收藏」，
+           所以下面这几行一个字都不用改。 */
+        var action = willFav ? toggleFavoriteMock : removeFavoriteMock;
+
+        action(slug, function onDone(isFav) {
           inFlight[slug] = false;
           favState[slug] = willFav;              // 只有回包成功才落状态
           paintFav(btn, willFav ? 'on' : 'off');
           if (willFav) popFav(btn);
-        }, function onError() {
+        }, function onError(err) {
           inFlight[slug] = false;
           /* 失败就退回点击前的样子，别让按钮停在一个骗人的状态上 */
           paintFav(btn, favState[slug] === true ? 'on' : 'off');
-          showToast('没能' + (willFav ? '收藏' : '取消收藏') + '「' + name + '」，请再点一次试试。');
+          /* Day 24：把错误记进 console 再提示。
+             原来直接把 err 丢了（Day 23 审计判过的毛病：catch 丢 err）。
+             排查「为什么取消失败」时，console 里必须有原始 code。 */
+          console.error('[index] ' + (willFav ? '收藏' : '取消收藏') + '失败：', err);
+          showToast('没能' + (willFav ? '收藏' : '取消收藏') + '「' + name + '」'
+                  + '，请刷新页面后再试一次。');
         });
       }
 
@@ -668,10 +682,16 @@
       function renderSuccess(list) {
         setState('success');
 
-        /* 已收录条数 = 只统计「写完了」的记录（PRD.md §6.1） */
+        /* 已收录条数 = 只统计「写完了」的记录（PRD.md §6.1）
+           Day 20 起列表来自公网接口，接口直接给了 isComplete（数据库的完整度视图
+           算出来的），所以优先用它；没有这个字段时才退回本地的字段检查。 */
         var completeCount = 0;
         for (var i = 0; i < list.length; i++) {
-          if (isConceptComplete(list[i])) completeCount++;
+          if (typeof list[i].isComplete === 'boolean') {
+            if (list[i].isComplete) completeCount++;
+          } else if (isConceptComplete(list[i])) {
+            completeCount++;
+          }
         }
         var todoCount = list.length - completeCount;
 
@@ -680,12 +700,13 @@
           countText += '（另有 ' + todoCount + ' 条待补充，未计入）';
         }
 
-        /* 最近更新日期：列表已按日期倒序，取第一条有日期的记录即可 */
+        /* 最近更新日期：列表已按日期倒序，取第一条有日期的记录即可。
+           Day 20 起这份列表来自公网接口，所以这个日期就是数据库里的真实发布日期。 */
         var latest = '';
         for (var k = 0; k < list.length; k++) {
           if (list[k].date) { latest = list[k].date; break; }
         }
-        if (latest) countText += ' · 最近更新 ' + esc(latest);
+        if (latest) countText += ' · 最近更新 ' + esc(latest) + '（数据来自数据库）';
 
         countEl.innerHTML = countText;
 
@@ -702,7 +723,11 @@
           html += '  <a class="item" href="concept.html?id=' + encodeURIComponent(c.slug) + '">';
           html += '    <div class="item-meta">';
           html += '      <span>' + esc(c.date || '日期待补充') + '</span>';
-          if (!isConceptComplete(c)) html += '      <span class="tag-todo">待补充</span>';
+          /* 「待补充」标签：同样优先用接口给的 isComplete */
+          var isTodo = (typeof c.isComplete === 'boolean')
+            ? (c.isComplete !== true)
+            : (!isConceptComplete(c));
+          if (isTodo) html += '      <span class="tag-todo">待补充</span>';
           html += '    </div>';
           html += '    <h2 class="item-title">' + esc(c.titleZh)
                 +       '<span class="en">' + esc(c.titleEn) + '</span></h2>';
@@ -722,31 +747,58 @@
         countEl.textContent = '已更新 0 个概念';
         listEl.innerHTML = panel(
           '内容准备中',
-          '还没有写入任何概念。往 <code>concepts.js</code> 里加一条，刷新后它会自动出现在这里。'
+          '数据库里还没有写入任何概念。往 <code>concepts</code> 表里加一条，刷新后它会自动出现在这里。'
         );
       }
 
       /* ==========================================================================
-       * 状态 4 / 4：错误 —— 数据文件没加载成功（PRD.md §7 第 5 项）
+       * 状态 4 / 4：错误 —— 数据没能取回来（PRD.md §7 第 5 项）
+       * Day 20 起数据来自公网接口，所以失败原因不再是「文件没放一起」，
+       * 而可能是：断网 / 跨域被拦 / 接口异常。文案已按真实原因改写。
        * 用 typeof 判断是安全的：即使取数函数根本不存在，也不会抛错。
+       *
+       * Day 23 改：原先三类错误共用一句话（实测发现：后端表名写错返回 500 时，
+       * 页面却说「没能连上数据接口…跨域白名单」——服务端故障被误报成用户网络问题，
+       * 会让人白等 1-2 分钟）。现按 err.code 分场景给不同中文提示。
        * ========================================================================== */
-      function renderError() {
+      function renderError(err) {
         setState('error');
         countEl.textContent = '';
-        listEl.innerHTML = panel(
-          '内容没能加载出来',
-          '数据文件可能没和页面放在同一个文件夹里。请确认 <code>concepts.js</code> 与 <code>index.html</code> '
-          + '在同一目录下，然后刷新页面再试。'
-        );
+
+        /* 三类口径与console.html 的 presentError 一致：
+             网络/接口错 → 提示稍后再试；服务端错 → 通用提示 + 日志，不说细节。 */
+        var code = (err && err.code) || '';
+        var title, body;
+
+        if (code === 'INTERNAL_ERROR') {
+          title = '内容没能加载出来';
+          body = '页面出了点问题，稍后再试。这是我们这边的问题，已经记下日志了。';
+          console.error('[index] 服务端错误 code=' + code, err);
+        } else if (code === 'DB_UNAVAILABLE') {
+          title = '内容暂时打不开';
+          body = '内容服务暂时不可用，请稍后再刷新页面。不需要改你填的任何内容。';
+          console.warn('[index] 内容服务不可用', err);
+        } else if (code === 'NETWORK_ERROR') {
+          title = '内容没能加载出来';
+          body = '网络连不上，没能取到内容。请检查网络后刷新页面再试。';
+          console.warn('[index] 网络层失败', err);
+        } else {
+          /* 未知码 / 没给code：保守按网络错说，不提跨域白名单等内部排查话术 */
+          title = '内容没能加载出来';
+          body = '没能取到内容，请稍后刷新页面再试。';
+          console.warn('[index] 取数失败，未知错误码：', code, err);
+        }
+
+        listEl.innerHTML = panel(title, body);
       }
 
       /* ==========================================================================
        * 主流程：先进入「加载中」，取数回来后再切到另外三种状态之一
        * --------------------------------------------------------------------------
-       * 取数走 fetchConceptList()（mock 异步，见 concepts.js 第三节）。
-       * 因为它是异步的，浏览器会先把「加载中」真正画到屏幕上，
-       * 约 350ms 后数据回来，再换成概念列表。
-       * 将来换成真实接口，这一段一行都不用改。
+       * 取数走 fetchConceptList()（见 concepts.js 第三节）。
+       * Day 20 起它是真的在调公网接口 GET /api/concepts，
+       * 所以「加载中」是真实的网络等待，不是假装的。
+       * 因为这层函数名与回调形状从 Day 8 保持至今，这一段从Day 8 到今天一行都没改过。
        * ========================================================================== */
       renderLoading();
 
@@ -767,7 +819,7 @@
       fetchConceptList(function (list) {
 
         /* 调试开关优先：让空态、错误态也能被肉眼验收 */
-        if (forced === 'error') { renderError(); return; }
+        if (forced === 'error') { renderError({ code: 'INTERNAL_ERROR' }); return; }
         if (forced === 'empty') { renderEmpty(); return; }
 
         /* 异常：一条内容都没有（PRD.md §7 第 3 项） */
@@ -778,6 +830,23 @@
 
         /* 正常 */
         renderSuccess(list);
+
+        /* Day 20 新增：列表渲染完后，把数据库里已收藏的 slug 读回来，
+           填进 favState 并重画按钮 —— 这样刷新页面不会「忘记」收藏。
+           这是只读的补充动作，失败也不影响上面的列表，所以不接错误回调。 */
+        if (typeof fetchFavoriteSlugs === 'function') {
+          fetchFavoriteSlugs(function (slugs) {
+            if (!slugs || !slugs.length) return;
+            for (var n = 0; n < slugs.length; n++) favState[slugs[n]] = true;
+            /* 重画所有收藏按钮，让已收藏的显示成实心 */
+            var btns = listEl.querySelectorAll('.fav-btn');
+            for (var b = 0; b < btns.length; b++) paintFav(btns[b], 'on');
+          });
+        }
+      }, function onListFail(err) {
+        /* Day 23 改：把错误对象传下去，让 renderError 按 code 分场景提示
+           （原先三类共用一句话，服务端500 会被误报成网络问题）。 */
+        renderError(err);
       });
     })();
   </script>

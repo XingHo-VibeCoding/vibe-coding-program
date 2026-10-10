@@ -55,7 +55,8 @@
 | `NOT_FOUND` | 404 | 请求路径未登记任何接口（兜底） | 接口不存在 |
 | `MISSING_FIELD` | 400 | 写接口请求体缺必填字段 | 请指定要收藏的概念 |
 | `INVALID_FIELD` | 400 | 字段类型不对（如 `slug` 传了数字/数组/对象） | 收藏的内容格式不对 |
-| `FIELD_TOO_LONG` | 400 | 字段超过长度上限（`slug` > 64 或 `note` > 200 字符） | 备注最多 200 字 |
+| `SLUG_TOO_LONG` | 400 | `slug` 超过 64 字符 | 概念编号格式不对 |
+| `NOTE_TOO_LONG` | 400 | `note` 超过 200 字符 | 备注最多 200 字 |
 | `DUPLICATE_FAVORITE` | 409 | 该概念已在收藏中 | 这个概念你已经收藏过了 |
 | `FAVORITE_NOT_FOUND` | 404 | PATCH / DELETE 的 `id` 在库里查不到 | 这条收藏已经不在了 |
 | `INVALID_ID` | 400 | 路径 `id` 不是正整数（字母 / 负数 / 0 / 小数 / 空） | 收藏编号不对，请刷新页面重试 |
@@ -158,7 +159,7 @@
 | 请求头 | `Content-Type: application/json` |
 | 请求体 | `{ "slug": "007-rag", "note": "可选备注" }` |
 | 成功响应 | `201`，`data` 形状见下方 JSON |
-| 错误响应 | `MISSING_FIELD`(400) / `INVALID_FIELD`(400) / `FIELD_TOO_LONG`(400) / `CONCEPT_NOT_FOUND`(404) / `DUPLICATE_FAVORITE`(409) / `DB_UNAVAILABLE`(503) / `INTERNAL_ERROR`(500) |
+| 错误响应 | `MISSING_FIELD`(400) / `INVALID_FIELD`(400) / `SLUG_TOO_LONG`(400) / `NOTE_TOO_LONG`(400) / `CONCEPT_NOT_FOUND`(404) / `DUPLICATE_FAVORITE`(409) / `DB_UNAVAILABLE`(503) / `INTERNAL_ERROR`(500) |
 
 ```json
 {
@@ -177,8 +178,8 @@
 
 | 字段 | 必填 | 类型 | 长度上限 | 不满足时的码 |
 |---|---|---|---|---|
-| `slug` | 是 | string | ≤ 64 字符（服务端转小写、去空白后匹配） | 缺 → `MISSING_FIELD`；类型错 → `INVALID_FIELD`；超长 → `FIELD_TOO_LONG` |
-| `note` | 否 | string | ≤ 200 字符；允许空/缺省 | 类型错 → `INVALID_FIELD`；超长 → `FIELD_TOO_LONG` |
+| `slug` | 是 | string | ≤ 64 字符（服务端转小写、去空白后匹配） | 缺 → `MISSING_FIELD`；类型错 → `INVALID_FIELD`；超长 → `SLUG_TOO_LONG` |
+| `note` | 否 | string | ≤ 200 字符；允许空/缺省 | 类型错 → `INVALID_FIELD`；超长 → `NOTE_TOO_LONG` |
 
 > 要点：
 > 1. **防重复**：同一概念重复收藏返回 `DUPLICATE_FAVORITE`(409)，**不写入第二行**；数据库上以 `favorites.concept_id` 的 `UNIQUE` 约束兜底，云函数捕获唯一冲突后转成该业务码。
@@ -228,7 +229,7 @@
 | 请求头 | `Content-Type: application/json` |
 | 请求体 | `{ "note": "新的备注" }` —— **只允许这一个字段** |
 | 成功响应 | `200`，`data` 形状 = 被改完的那一行（与 §4.5 `items[]` 元素同构，见下方 JSON） |
-| 错误响应 | `INVALID_ID`(400) / `MISSING_NOTE`(400) / `PATCH_INVALID_FIELD`(400) / `PATCH_FIELD_NOT_ALLOWED`(400) / `FIELD_TOO_LONG`(400) / `FAVORITE_NOT_FOUND`(404) / `DB_UNAVAILABLE`(503) / `INTERNAL_ERROR`(500) |
+| 错误响应 | `INVALID_ID`(400) / `MISSING_NOTE`(400) / `PATCH_INVALID_FIELD`(400) / `PATCH_FIELD_NOT_ALLOWED`(400) / `NOTE_TOO_LONG`(400) / `FAVORITE_NOT_FOUND`(404) / `DB_UNAVAILABLE`(503) / `INTERNAL_ERROR`(500) |
 
 ```json
 // PATCH /api/favorites/14   {"note":"测试-改"}
@@ -251,7 +252,7 @@
 | 字段 | 必填 | 类型 | 长度上限 | 说明 |
 |---|---|---|---|---|
 | 路径参数 `id` | 是 | 正整数 | — | 非正整数 → `INVALID_ID`(400) |
-| `note` | **是** | string | ≤ 200 字符 | 缺失 → `MISSING_NOTE`；非字符串 → `PATCH_INVALID_FIELD`；超长 → `FIELD_TOO_LONG` |
+| `note` | **是** | string | ≤ 200 字符 | 缺失 → `MISSING_NOTE`；非字符串 → `PATCH_INVALID_FIELD`；超长 → `NOTE_TOO_LONG` |
 
 > 要点：
 > 1. **只允许改 `note`**：传了别的字段 → `PATCH_FIELD_NOT_ALLOWED`(400)，**不静默忽略**。`slug` 指向哪个概念属于这条收藏的身份，改了等于换成另一条收藏；`concept_id` 是外键，更不该从接口层动。**想换收藏对象 = 删掉再收藏。**

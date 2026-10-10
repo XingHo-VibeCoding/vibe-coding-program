@@ -38,11 +38,16 @@
  *
  * sources 里的链接都已在 2026-09-22 实测可达（arXiv 原始论文页 + 厂商官方文档）。
  *
- * 取数方式（Day 8 起）
- *   页面不再直接调用 getConceptList()，改为调用 fetchConceptList(callback)。
- *   后者是 mock 异步版本：用 setTimeout 假装「等了一下」，
- *   让首页的「加载中」状态真正可见，也让页面提前按异步写法写好。
- *   将来（Day 23）换成真实接口，只需要改这一个函数，页面文件一行都不用动。
+ * 取数方式（Day 20 起：走真实公网接口）
+ *   页面调用 fetchConceptList(callback) —— 这个函数名与回调形状从 Day 8 一直没变，
+ *   Day 20 只是把里面的 setTimeout 换成了真的 fetch 调用公网接口
+ *   （GET /api/concepts，见 api-contract.md §4.2）。
+ *   因为接口形状对上了，index.html 一行都不用改。
+ *
+ * 数据来源说明（重要，别再当成mock）：
+ *   下面 CONCEPTS 数组里的 7 条内容**仍然保留**，它们是数据库的种子数据，
+ *   也是接口挂掉时的对照参考。页面现在显示的内容来自数据库，不是这个数组。
+ *   要改内容请改数据库（改了刷新就变），不要只改这个数组。
  * ========================================================================== */
 
 
@@ -397,74 +402,315 @@ function getConceptBySlug(slug) {
 
 
 /* ==========================================================================
- * 三、mock 异步数据源（Day 8 新增）
+ * 三、真实接口数据源（Day 20 接入，替换 Day 8 的 mock 版）
  * --------------------------------------------------------------------------
- * 为什么要有这一层：
- *   真实的取数（Day 23 接入数据库、或者调用接口）一定是异步的 —— 要等网络回来。
- *   现在还没接后端，所以先用 setTimeout 假装「等了一下」。好处有三个：
- *     1. 首页的「加载中」状态能真正被看到，而不是一闪而过；
- *     2. 页面的写法提前对齐真实情况，将来换接口时页面代码不用重写；
- *     3. 数据仍然全部来自本文件，属于「本地假数据」，没有连任何外部服务。
+ * 这一层从 Day 8 的 setTimeout 假异步，换成了真正的网络请求。
+ * 函数名与回调形状**故意保持不变**（fetchConceptList(onDone) 仍是
+ * 「拿到排好序的数组就调 onDone」），所以 index.html 一行都不用改 ——
+ * 这正是 Day 8 埋这层时预留的位置。
  *
- * 将来要改什么：
- *   把下面的 setTimeout 换成真实的网络请求即可，函数名与回调形状保持不变。
+ * 接口契约见 api-contract.md：
+ *   GET  {API_BASE}/api/concepts  -> { ok, data: { items, completeCount,
+ *                                       totalCount, latestDate }, error }
+ *   GET  {API_BASE}/api/favorites -> { ok, data: { items, count }, error }
+ *   POST {API_BASE}/api/favorites -> 201，同上
+ *
+ * 跨域（Day 20 实测结论，重要）：
+ *   页面在 ai-concept-daily.app.workbuddy.host，接口在网关域名，两个域不同，
+ *   浏览器会拦。已确认网关三条 API 路由的 EnableSafeDomain 都是 true，
+ *   也就是说**网关会自动补CORS 响应头**——但前提是「安全域名白名单」
+ *   里有你的页面域名。白名单格式是 host（不带协议），本地调试还要带端口。
+ *   配好后不需要改后端代码，也不需要用 * 通配符。
  * ========================================================================== */
 
-/* 假装「取数要花的时间」，单位毫秒。调小一点，加载态就消失得更快。 */
-var MOCK_DELAY_MS = 350;
+/* 接口根地址。生产环境就这一个值；本地调试同一个地址，不用改。 */
+var API_BASE = 'https://ai-concept-daily-d2ex3o18b05e6dd-1498895639.ap-shanghai.app.tcloudbase.com';
+
+/* 网络请求最长等多久（毫秒）。超时按失败处理，页面会显示错误态。 */
+var API_TIMEOUT_MS = 12000;
 
 /**
- * 异步取全部概念（mock 版）。
+ * 把 fetch 包一层：统一超时 + 统一拆信封。
+ * 页面只关心「拿到数据」或「拿到Error」，不关心 HTTP 状态码。
+ *
+ * @param  {string}   url    完整请求地址
+ * @param  {object}   opts   fetch 的第二个参数（method / headers / body）
+ * @param  {function} onDone 成功回调，参数是信封里的 data
+ * @param  {function} onFail 失败回调，参数是一个 Error（消息已翻译成中文）
+ */
+function apiRequest(url, opts, onDone, onFail) {
+  /* 浏览器没有 fetch 时（比如很老的浏览器）直接判失败，不静默卡住 */
+  if (typeof fetch !== 'function') {
+    onFail(new Error('当前浏览器不支持 fetch，无法读取接口数据。'));
+    return;
+  }
+
+  var done = false;
+  function finish(fn, arg) {
+    if (done) return;   /* 超时和真实回包只认先到的那一个 */
+    done = true;
+    fn(arg);
+  }
+
+  var timer = setTimeout(function () {
+    finish(onFail, new Error('接口请求超时（' + (API_TIMEOUT_MS / 1000) + ' 秒），请检查网络后刷新。'));
+  }, API_TIMEOUT_MS);
+
+  fetch(url, opts).then(function (res) {
+    return res.text().then(function (text) {
+      var body = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch (e) {
+        throw new Error('接口返回的不是合法 JSON（HTTP ' + res.status + '）。');
+      }
+      /* 统一信封：失败时 error.message 已经是中文人话，直接往上抛。
+         把 code 挂到 Error 上，调用方可以按错误码分支处理
+         （比如 409「已经收藏过了」要当成功，而不是当失败）。
+
+         Day 23 审计补充：**网关层错误不走云函数**，信封形状不同 ——
+         { code:"INVALID_PATH", message:"Invalid path...docs.cloudbase.net..." }
+         是全英文的。原来这里会把那句英文原样抛出去，首页就会显示
+         一串英文和文档链接。认出这种形状，换成中文再抛。 */
+      if (!body || body.ok !== true) {
+        var failErr;
+        if (body && !body.ok && body.code && body.message && !body.error) {
+          console.warn('[concepts] 网关层错误（非云函数返回）：', body);
+          failErr = new Error('接口地址不存在，请检查访问的地址是否正确。');
+          failErr.code = 'GW_' + body.code;
+        } else {
+          var code = (body && body.error && body.error.code) || ('HTTP_' + res.status);
+          var msg = (body && body.error && body.error.message) || '接口调用失败（' + code + '）。';
+          failErr = new Error(msg);
+          failErr.code = code;
+        }
+        failErr.status = res.status;
+        throw failErr;
+      }
+      finish(function () {
+        clearTimeout(timer);
+        onDone(body.data);
+      });
+    });
+  }).catch(function (err) {
+    clearTimeout(timer);
+    /* fetch 本身的网络失败（断网、DNS、跨域被拦）都会落到这里。
+       注意：如果 err 是上面带 code 抛出来的信封错误，原样透传，不要改写。 */
+    if (err && err.code) { finish(onFail, err); return; }
+    var m = (err && err.message) || '网络请求失败。';
+    /* 跨域被拦时 err.message 通常是 'Failed to fetch'。
+       Day 23 审计发现：原来这里会把排查话术（「确认白名单里是页面域名
+       不带 https」）直接显示给终端用户 —— 那是给作者看的调试口诀，
+       不是给使用者看的。这里改成中性文案，**原始信息只进 console**。 */
+    if (/failed to fetch|networkerror|load failed/i.test(m)) {
+      console.warn('[concepts] 请求未送达接口（可能是断网或跨域未放行）：', m);
+      m = '网络连不上，请检查网络后刷新页面。';
+    }
+    var netErr = new Error(m);
+    netErr.code = 'NETWORK_ERROR';   /* 与接口错误码区分开，便于排查 */
+    finish(onFail, netErr);
+  });
+}
+
+/**
+ * 异步取全部概念 —— 现在走真实接口 GET /api/concepts。
  * 等待期间，调用方应该显示「加载中」。
  *
- * @param {function} onDone 取数完成后的回调，参数是排好序的概念数组
+ * 接口返回的 items 已经按 published_on DESC + serial_no DESC 排好序，
+ * 与本地 getConceptList() 的排序规则一致，所以这里直接用接口顺序。
+ *
+ * @param {function} onDone  取数完成后的回调，参数是排好序的概念数组
+ * @param {function} [onFail] 取数失败的回调，参数是一个 Error（可选，兼容旧调用方）
  */
-function fetchConceptList(onDone) {
-  setTimeout(function () {
-    onDone(getConceptList());
-  }, MOCK_DELAY_MS);
+function fetchConceptList(onDone, onFail) {
+  /* 没传 onFail 的旧调用方：不能给它一个假空数组 —— 那会让页面显示
+     「还没有写入任何概念」，把「接口挂了」说成「没内容」，是误导。
+     这里直接把错误抛到控制台，页面走错误态。 */
+  var fail = onFail || function (err) {
+    console.error('[concepts] 取数失败且调用方未提供 onFail：', err);
+    throw err;
+  };
+
+  apiRequest(
+    API_BASE + '/api/concepts',
+    { method: 'GET', headers: { 'Accept': 'application/json' } },
+    function (data) {
+      var items = (data && Array.isArray(data.items)) ? data.items : [];
+      onDone(items);
+    },
+    function (err) {
+      console.error('[concepts] 读取概念列表失败：', err);
+      fail(err);
+    }
+  );
 }
 
 
 /* ==========================================================================
- * 四、mock 收藏服务（Day 11 新增）
+ * 四、收藏服务（Day 20 接入真实写接口，替换 Day 11 的 mock 版）
  * --------------------------------------------------------------------------
- * 今天只做「前端临时状态」，不接数据库。这一层不写任何数据、不发任何网络请求，
- * 只做一件事：用 setTimeout 假装「请求在路上」，让「处理中」和「失败」
- * 这两种状态真的能被看到、能被验收。
+ * Day 11 时这里只改内存状态；现在改成真的调POST /api/favorites，
+ * 写入 CloudBase PostgreSQL。接口 201 之后，数据库里就真的多一行。
  *
- * 收藏结果存在 index.html 的内存变量里，刷新页面即清空 ——
- * 与 PRD.md §5.7「不写浏览器存储」保持一致。
+ * 两条接口分工明确（Day 22 起两条都有了，契约见 api-contract §4.6 / §4.7）：
+ *   收藏   POST   {API_BASE}/api/favorites         传slug          → 201
+ *   取消   DELETE {API_BASE}/api/favorites/{id}    不带请求体      → 200 + 被删的那一行
  *
- * 将来要改什么：
- *   把下面的 setTimeout 换成真实请求即可 —— 成功调 onDone()，
- *   失败调 onError()，页面里的调用形状一行都不用改。
+ * ⚠️ DELETE 要的是**收藏 id**，不是 slug。而 GET /api/concepts 不返回 favoriteId，
+ *    所以取消功能的前提是「知道这条 slug 对应的 id」——由下面的 favIdsBySlug
+ *    从 GET /api/favorites 建立。没建立到就不让取消，并给出能照做的提示，
+ *    **绝不能拿 slug 去当 id 用**，那会误删别人那一行。
+ *
+ * 成功时调 onDone(是否已收藏)，页面据此更新按钮外观，形状与 Day 11 的 mock 版一致。
  * ========================================================================== */
 
-/* 假装「收藏请求来回要花的时间」，单位毫秒。
-   故意比取数慢一些（700ms），这样「处理中」的禁用状态肉眼看得清，
-   也方便验证「连点两下只提交一次」。 */
-var MOCK_FAVORITE_DELAY_MS = 700;
-
-/* 故障注入开关：默认关闭。
-   index.html 从地址栏读到 ?favfail=1 时会把它置为 true，用来验收「失败提示」。
-   真实使用中它永远是 false。 */
+/* 故障注入开关：保留 Day 11 的验收开关（?favfail=1），
+   用来验收「失败提示」那条路径，不影响正常流程。 */
 var FAVORITE_FORCE_FAIL = false;
 
+/* slug -> 收藏 id 的对照表，Day 24 新增。
+   DELETE /api/favorites/{id} 要的是 id（契约§4.7），而列表接口不返回 favoriteId，
+   所以只能从 GET /api/favorites 的读回结果里建这张表。
+   读不到就不建 —— 取消时查不到 id 就明确提示「先刷新页面」，不猜。 */
+var favIdsBySlug = {};
+
+/* 取某个 slug 的收藏 id；没有就返回 null。 */
+function getFavoriteId(slug) {
+  var id = favIdsBySlug[String(slug)];
+  return (typeof id === 'number') ? id : null;
+}
+
 /**
- * 切换一条概念的收藏状态（mock 版，不落库、不写存储）。
+ * 取消收藏 —— 走真实接口 DELETE /api/favorites/{id}（契约 §4.7）。
+ *
+ * ⚠️ 与 POST 的区别，踩过的坑记在这里：
+ *   POST 是按 slug「幂等」的（重复收藏回 409，当成功处理）；
+ *   DELETE 是按 id「破坏性」的 —— id 错了就删错那一行，而且不可撤销。
+ *   所以这里多一道校验：没有 id 就直接失败，绝不拿 slug 硬凑。
+ *
+ * @param {string}   slug    概念编号
+ * @param {function} onDone  成功回调，参数固定false（已取消）
+ * @param {function} onError 失败回调，参数是一个 Error
+ */
+function removeFavoriteMock(slug, onDone, onError) {
+  /* 保留 Mock 后缀：与上面的 toggleFavoriteMock 命名成对，
+     也提醒「这一层将来可能换回真实现」。 */
+
+  if (FAVORITE_FORCE_FAIL) {
+    onError(new Error('取消收藏请求失败（?favfail=1 强制注入）'));
+    return;
+  }
+
+  var id = getFavoriteId(slug);
+
+  /* 没查到 id 就不能发请求。原因通常是「读回收藏列表那一步失败了」，
+     给一句能照做的提示，而不是拿 slug 当 id 去试。 */
+  if (id === null) {
+    onError(new Error('不知道这条收藏的编号，请刷新页面再试一次。'));
+    return;
+  }
+
+  apiRequest(
+    API_BASE + '/api/favorites/' + id,
+    { method: 'DELETE', headers: { 'Accept': 'application/json' } },
+    function (data) {
+      /* 成功：把本地对照表里的这条也清掉，
+         否则用户再点一次会拿着一个已失效的 id 去删（后端会回 404）。 */
+      delete favIdsBySlug[String(slug)];
+      onDone(false);
+    },
+    function (err) {
+      /* 404 = 那一行已经不在了。对「取消」这个目标而言已经达成，
+         当成功处理，避免用户看到「没能取消收藏」这种吓人提示。
+         同样要把对照表清掉，否则会一直拿着过期 id 重试。 */
+      if (err && (err.code === 'FAVORITE_NOT_FOUND' || err.code === 'NOT_FOUND')) {
+        delete favIdsBySlug[String(slug)];
+        onDone(false);
+        return;
+      }
+      console.error('[concepts] 取消收藏失败：', err);
+      onError(err);
+    }
+  );
+}
+
+/**
+ * 收藏一个概念 —— 走真实接口 POST /api/favorites。
  *
  * @param {string}   slug    概念编号，例如 "007-rag"
- * @param {function} onDone  成功回调
+ * @param {function} onDone  成功回调，参数是布尔「是否已收藏」
  * @param {function} onError 失败回调，参数是一个 Error
  */
 function toggleFavoriteMock(slug, onDone, onError) {
-  setTimeout(function () {
-    if (FAVORITE_FORCE_FAIL) {
-      /* 失败路径也留一句提示，方便在控制台里看出是哪一步失败 */
-      onError(new Error('mock: 收藏请求失败（?favfail=1 强制注入）'));
-      return;
+  /* 保留旧名toggleFavoriteMock：index.html 就是按这个名字调用的，
+     改名就要动页面文件。今天的纪律是页面逻辑一行不改。 */
+
+  if (FAVORITE_FORCE_FAIL) {
+    /* 故障注入：立刻走失败路径，用来验收页面的失败提示 */
+    onError(new Error('收藏请求失败（?favfail=1 强制注入）'));
+    return;
+  }
+
+  apiRequest(
+    API_BASE + '/api/favorites',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ slug: slug })
+    },
+    function (data) {
+      /* POST 201 的 data 形状是「新建的那一行」{ id, slug, note, createdAt }」
+         （见 api-contract §4.4）；GET 的 data 才是 { items, count }（§4.5）。
+         两者形状不同，别混用。 */
+      /* Day 24：记下这条收藏的 id，否则用户随后点「取消」时无 id 可删。 */
+      if (data && data.slug === slug && typeof data.id === 'number') {
+        favIdsBySlug[String(slug)] = data.id;
+      }
+      onDone(!!(data && data.slug === slug));
+    },
+    function (err) {
+      /* 409「已经收藏过了」不是错误状态 —— 结果就是「已收藏」，
+         不该让页面弹「没能收藏」。这里把它转成成功回调。
+         判断依据是 apiRequest 抛出的 Error 上带的 code（见下）。 */
+      if (err && err.code === 'DUPLICATE_FAVORITE') {
+        onDone(true);
+        return;
+      }
+      console.error('[concepts] 收藏写入失败：', err);
+      onError(err);
     }
-    onDone();
-  }, MOCK_FAVORITE_DELAY_MS);
+  );
+}
+
+/**
+ * 读回收藏列表 —— GET /api/favorites（Day 19 已有，Day 20 接进页面）。
+ * 用途：页面刷新后能把「已收藏」的真实状态读回来，不再只靠内存变量。
+ *
+ * @param {function} onDone  成功回调，参数是已收藏的 slug 数组
+ * @param {function} [onFail] 失败回调（可选）
+ */
+function fetchFavoriteSlugs(onDone, onFail) {
+  apiRequest(
+    API_BASE + '/api/favorites',
+    { method: 'GET', headers: { 'Accept': 'application/json' } },
+    function (data) {
+      var items = (data && Array.isArray(data.items)) ? data.items : [];
+      var slugs = [];
+      /* Day 24 新增：顺手建 slug -> id 对照表，供取消收藏用。
+         原来只把 slug 取出来就丢了 id，DELETE 找不到该删哪一行。 */
+      for (var i = 0; i < items.length; i++) {
+        if (items[i] && items[i].slug) {
+          slugs.push(items[i].slug);
+          if (typeof items[i].id === 'number') {
+            favIdsBySlug[String(items[i].slug)] = items[i].id;
+          }
+        }
+      }
+      onDone(slugs);
+    },
+    function (err) {
+      console.warn('[concepts] 读回收藏列表失败（不影响浏览）：', err);
+      if (onFail) onFail(err); else onDone([]);
+    }
+  );
 }
