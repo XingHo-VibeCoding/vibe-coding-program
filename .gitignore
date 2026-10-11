@@ -116,7 +116,15 @@ desktop.ini
 *.sw?
 
 # ---------- 7. AI 工具的本地缓存与本地笔记（含项目记忆，不上传） ----------
-.workbuddy/
+# ⚠️ 写法说明（Day 25 实测踩坑）：
+# 不能写 `.workbuddy/`—— Git 不会进入被整目录排除的目录，
+# 后面写的「! 例外」会**静默失效**（以为放行了，其实没有）。
+# 必须：排除一级子项 → 放行 skills → 对 skills 下的本地私有 skill 逐个精确排除。
+.workbuddy/*
+!.workbuddy/skills/
+
+# skills 目录内的本地私有 Skill（个人工具，不属于项目资产，不入库）
+.workbuddy/skills/frontend-page-rules/
 
 # ---------- 8. 其他本地/私密内容 ----------
 # 草稿、私人笔记、未发布的素材
