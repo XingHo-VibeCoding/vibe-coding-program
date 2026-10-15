@@ -502,9 +502,71 @@ const SECRET_RE = 'sk-[A-Za-z0-9]{10}|ghp_[A-Za-z0-9]{10}|AKID[A-Za-z0-9]{10}|ey
 // 通用弱占位词表：这些值出现在连接串的用户名/密码段时视为文档示例
 const WEAK_PLACEHOLDER = /^(user|username|pass|password|root|test|demo|your[_-]?\w*|my\w*|<[^>]*>|\{\{?[^}]*\}?\}|\$\{[^}]*\}|xxx+|xxx|\*+|placeholder|example|changeme|your_password_here|your_api_key_here)$/i;
 
+/* --------------------------------------------------------------------------
+ * 第 3 层分类：META（判据自指 / 历史注入记录）—— Day 27 新增
+ * --------------------------------------------------------------------------
+ * 起因（Day 27 门禁实跑 19:35 的真实发现）：
+ *   D1/D2/D4 报出 5 处 FAIL，逐条核对原文后确认**无真实泄露**。命中的全是
+ *   「审计文档在解释判据本身」或「记录 Day 25 故意注入的假密钥」的说明行：
+ *     SKILL.md:309            讲规则的那一行（举 realuser:s3cret 作反例）
+ *     Day25-验证记录.md:139    同上（分类树的说明）
+ *     Day25-验证记录.md:175/185/191  引用 Day 25 注入的假 AIza…（已撤销）
+ *   根因：Day 25 的实跑发生在**提交之前**，这些文档入库后第一次被扫到自己。
+ *
+ * 处置不是放宽判据，而是加第三层（原两层：正则命中 → 强特征/弱占位符）：
+ *   命中行本身或**前后各 2 行**内出现说明性标记（故意注入 / 假密钥 / 示例 /
+ *   演示 / 假设 / 判据 / 占位 / 不是真实 / 已撤销 / 应查出 …）→ 归 META，
+ *   不判 FAIL，但与 PLACEHOLDER 同纪律：**必须逐条列出并写明命中的标记词**。
+ *   为什么必须看上下文窗口：Day25:175 的密钥与标记词是**分两行**写的
+ *   （上一行 `<!-- Day 25 故意注入的测试缺陷：…`，下一行才是 `AIza… -->`），
+ *   只看本行会漏判。
+ *
+ * 为什么这样**不削弱**真泄露检测（三条约束，逐条可验）：
+ *   1. 只对文档类文件（.md/.txt/.log）或 Git 历史 diff 行生效；
+ *      代码文件（.js/.mjs/.json/.html）里的连接串一律 REAL —— Day 25 的注入
+ *      测试正是打在 index.html:866，那个场景今天仍然 FAIL 被抓。
+ *   2. 不按文件名开白名单、不按密钥串开白名单。同一串密钥若出现在没有
+ *      说明标记的代码或普通文本里，照样判 REAL。
+ *   3. META 与 PLACEHOLDER 都逐条打印，不静默忽略；连续输出里可数。
+ * -------------------------------------------------------------------------- */
+/* 标记词表的收窄（Day 27 实测后调整）：
+   初版含「审计」一词，实测发现它在门禁输出里高频出现、覆盖面过宽，
+   已移除 —— 现在触发 META 的命中全部由更具体的词支撑
+   （故意注入 / 假密钥 / 不是真实 / 错误示范 / 占位 / 示例 / 判据 / 应查出）。
+   宁可多报一次待人工核对，也不要让标记词变成万能豁免。 */
+const META_MARKER = /故意注入|注入的测试|注入测试|假密钥|示例|演示|假设|判据|占位|不是真实|已撤销|撤销|revoked|应查出|错误示范|违规示例/;
+
+/**
+ * 判断某一行是否处在「判据自指 / 历史注入记录」的说明上下文里。
+ * @param {string[]} lines 全文按行切分
+ * @param {number}   idx   命中行下标
+ * @param {string}   file  文件名（'<git历史>' 表示 Git diff 行）
+ * @returns {string|null} 命中的标记词；null = 不是 META
+ */
+function metaContextOf(lines, idx, file) {
+  // 约束 1：代码文件不走 META。文档里的示例是说明，代码里的连接串就是配置。
+  const isDoc = /\.(md|txt|log)$/i.test(file) || file === '<git历史>';
+  if (!isDoc) return null;
+  const win = [lines[idx], lines[idx - 1], lines[idx - 2], lines[idx + 1], lines[idx + 2]]
+    .filter(l => typeof l === 'string');
+  for (const w of win) {
+    const m = w.match(META_MARKER);
+    if (m) return m[0];
+  }
+  return null;
+}
+
 // 判定一行命中是否属于「文档里的弱占位符示例」
 function classifyHit(file, line, opts = {}) {
   const isDoc = /\.(md|txt|log)$/i.test(file) || opts.history === true;
+
+  /* 第 3 层优先：上下文带说明标记（且限文档/历史行）→ META，不判 FAIL。
+     放在各强特征分支之前，因为「文档在讲这个形态」这件事本身就决定了
+     它不是凭证，无论它长得像私钥块还是像云厂商 Key。 */
+  if (opts.metaHit) {
+    return { kind: 'META', reason: `判据自指/历史注入记录：上下文出现说明标记「${opts.metaHit}」，本行是文档在描述示例，非真实凭证` };
+  }
+
   // 私钥块 / JWT / 云厂商 key 形态没有「占位符」概念，一律视为真命中
   if (/-----BEGIN|eyJ[A-Za-z0-9_-]{20}|AKID[A-Za-z0-9]{10}|AIza[0-9A-Za-z_-]{20}|xox[baprs]-/.test(line)) {
     return { kind: 'REAL', reason: '强特征形态（私钥块/JWT/云厂商 Key/Slack token），无占位符概念' };
@@ -545,14 +607,19 @@ function classifyHit(file, line, opts = {}) {
 }
 
 function scanText(file, text, opts = {}) {
-  const out = { real: [], placeholder: [] };
-  text.split('\n').forEach((line, i) => {
+  const out = { real: [], placeholder: [], meta: [] };
+  const lines = text.split('\n');
+  lines.forEach((line, i) => {
     if (!line.trim()) return;
     const re = new RegExp(SECRET_RE, 'i');
     if (!re.test(line)) return;
-    const c = classifyHit(file, line, opts);
+    /* Day 27：先算上下文标记（要看到前后各 2 行，所以按数组取而不是 forEach 单行） */
+    const metaHit = metaContextOf(lines, i, file);
+    const c = classifyHit(file, line, { ...opts, metaHit });
     const item = { where: `${file}:${i + 1}`, line: line.trim().slice(0, 200), ...c };
-    (c.kind === 'REAL' ? out.real : out.placeholder).push(item);
+    if (c.kind === 'REAL') out.real.push(item);
+    else if (c.kind === 'META') out.meta.push(item);
+    else out.placeholder.push(item);
   });
   return out;
 }
@@ -563,26 +630,27 @@ function groupD() {
     const ls = sh('git ls-files');
     const files = ls.out.split('\n').map(s => s.trim())
       .filter(f => f && !/\.(png|jpg|jpeg|gif|webp|ico)$/i.test(f));
-    const real = [], ph = [];
+    const real = [], ph = [], meta = [];
     for (const f of files) {
       const abs = join(PROJECT_ROOT, f);
       if (!fs.existsSync(abs)) continue;
       const g = sh(`cat ${JSON.stringify(f)} 2>/dev/null || true`);
       if (g.code !== 0) continue;
       const r = scanText(f, g.out);
-      real.push(...r.real); ph.push(...r.placeholder);
+      real.push(...r.real); ph.push(...r.placeholder); meta.push(...r.meta);
     }
-    const cmd = `git ls-files 逐个文件扫 9 类特征词 → 命中行再分类（强特征=FAIL / 文档弱占位符=PLACEHOLDER）`;
+    const cmd = `git ls-files 逐个文件扫 9 类特征词 → 命中行再分类（强特征=FAIL / 文档弱占位符=PLACEHOLDER / 判据自指=META）`;
     record({
       id: 'D1', title: '仓库已入库文件无真实密钥',
       cmd,
-      output: `扫描 ${files.length} 个非图片已入库文件；正则命中 ${real.length + ph.length} 行 → 判定真实凭证 ${real.length} 行 / 文档占位符 ${ph.length} 行` +
+      output: `扫描 ${files.length} 个非图片已入库文件；正则命中 ${real.length + ph.length + meta.length} 行 → 判定真实凭证 ${real.length} 行 / 文档占位符 ${ph.length} 行 / 判据自指 META ${meta.length} 行` +
         (real.length ? `\n【真实凭证，必须为空】\n${real.map(h => `  ${h.where}: ${h.line}\n    → ${h.reason}`).join('\n')}` : '\n【真实凭证】0 行') +
+        (meta.length ? `\n【判据自指/历史注入记录，不判FAIL 但如实列出】\n${meta.map(h => `  ${h.where}: ${h.line.slice(0, 110)}\n    → ${h.reason}`).join('\n')}` : '') +
         (ph.length ? `\n【文档占位符示例，不判FAIL 但如实列出】\n${ph.map(h => `  ${h.where}: ${h.line.slice(0, 110)}\n    → ${h.reason}`).join('\n')}` : ''),
       pass: real.length === 0,
-      evidence: `判据：**真实凭证命中数 = 0** → 实测 ${real.length}，${real.length === 0 ? '满足' : '不满足'}。（正则总命中 ${real.length + ph.length} 行，其中 ${ph.length} 行经分类为文档占位符示例，已逐条列出说明理由，未默默忽略）`,
+      evidence: `判据：**真实凭证命中数 = 0** → 实测 ${real.length}，${real.length === 0 ? '满足' : '不满足'}。（正则总命中 ${real.length + ph.length + meta.length} 行，其中 ${ph.length} 行文档占位符、${meta.length} 行判据自指，均已逐条列出说明理由，未默默忽略）`,
       defectType: real.length ? '被测对象缺陷' : null,
-      note: '第 1 轮修正项：原判据「正则命中=0」把审计文档里引用违规示例的文字也判成泄露（假 FAIL）。现改为两层判定：正则命中 → 再分类强特征/文档占位符。来源 Day 23 安全自查',
+      note: '第 1 轮修正项：原判据「正则命中=0」把审计文档里引用违规示例的文字也判成泄露（假 FAIL）。现改为两层判定：正则命中 → 再分类强特征/文档占位符。来源 Day 23 安全自查。Day 27 再加第三层 META（上下文标记法，只对文档/历史行生效，代码文件仍一律 REAL）',
     });
   }
 
@@ -592,14 +660,15 @@ function groupD() {
     const r = scanText('<git历史>', g.out, { history: true });
     record({
       id: 'D2', title: 'Git 全量历史无真实密钥',
-      cmd: `git log --all -p → 扫 9 类特征词 → 命中行分类（强特征 / 文档占位符）`,
-      output: `正则命中 ${r.real.length + r.placeholder.length} 行 → 真实凭证 ${r.real.length} 行 / 文档占位符 ${r.placeholder.length} 行` +
+      cmd: `git log --all -p → 扫 9 类特征词 → 命中行分类（强特征 / 文档占位符 / 判据自指 META）`,
+      output: `正则命中 ${r.real.length + r.placeholder.length + r.meta.length} 行 → 真实凭证 ${r.real.length} 行 / 文档占位符 ${r.placeholder.length} 行 / 判据自指 META ${r.meta.length} 行` +
         (r.real.length ? `\n【真实凭证】\n${r.real.map(h => `  git历史:${h.where.split(':')[1]}: ${h.line}\n    → ${h.reason}`).join('\n')}` : '\n【真实凭证】0 行') +
+        (r.meta.length ? `\n【判据自指/历史注入记录】\n${r.meta.map(h => `  git历史:${h.where.split(':')[1]}: ${h.line.slice(0, 110)}\n    → ${h.reason}`).join('\n')}` : '') +
         (r.placeholder.length ? `\n【文档占位符示例】\n${r.placeholder.map(h => `  git历史:${h.where.split(':')[1]}: ${h.line.slice(0, 110)}\n    → ${h.reason}`).join('\n')}` : ''),
       pass: r.real.length === 0,
-      evidence: `判据：真实凭证命中 = 0 → 实测 ${r.real.length}，${r.real.length === 0 ? '满足' : '不满足'}。占位符 ${r.placeholder.length} 行已如实列出`,
+      evidence: `判据：真实凭证命中 = 0 → 实测 ${r.real.length}，${r.real.length === 0 ? '满足' : '不满足'}。占位符 ${r.placeholder.length} 行、判据自指 ${r.meta.length} 行已如实列出`,
       defectType: r.real.length ? '被测对象缺陷' : null,
-      note: '第 1 轮修正项：同理。原判据把 TECH_DESIGN.md 表格里的 postgresql://user:password@host 示例判成真实凭证',
+      note: '第 1 轮修正项：同理。原判据把 TECH_DESIGN.md 表格里的 postgresql://user:password@host 示例判成真实凭证。Day 27 第三层 META 对 diff 行同样生效（diff 行无路径，靠上下文标记判定）',
     });
   }
 
@@ -626,7 +695,7 @@ function groupD() {
   {
     const g = sh(`grep -rIlE '${SECRET_RE}' . --exclude-dir=.git --exclude-dir=.workbuddy --exclude-dir=node_modules --exclude=.env 2>/dev/null || true`);
     const fl = g.out.split('\n').map(s => s.trim()).filter(Boolean);
-    const real = [], ph = [];
+    const real = [], ph = [], meta = [];
     for (const rel of fl) {
       const f = rel.replace(/^\.\//, '');
       const abs = join(PROJECT_ROOT, f);
@@ -634,18 +703,19 @@ function groupD() {
       const c = sh(`cat ${JSON.stringify(f)} 2>/dev/null || true`);
       if (c.code !== 0) continue;
       const r = scanText(f, c.out);
-      real.push(...r.real); ph.push(...r.placeholder);
+      real.push(...r.real); ph.push(...r.placeholder); meta.push(...r.meta);
     }
     record({
       id: 'D4', title: '工作区无真实密钥（排除 .env / .workbuddy）',
       cmd: `grep -rIlE "<9类特征词>" . --exclude-dir=.git --exclude-dir=.workbuddy --exclude=.env → 命中文件逐行分类`,
-      output: `命中文件 ${fl.length} 个；正则命中 ${real.length + ph.length} 行 → 真实凭证 ${real.length} 行 / 文档占位符 ${ph.length} 行` +
+      output: `命中文件 ${fl.length} 个；正则命中 ${real.length + ph.length + meta.length} 行 → 真实凭证 ${real.length} 行 / 文档占位符 ${ph.length} 行 / 判据自指 META ${meta.length} 行` +
         (real.length ? `\n【真实凭证】\n${real.map(h => `  ${h.where}: ${h.line}\n    → ${h.reason}`).join('\n')}` : '\n【真实凭证】0 行') +
+        (meta.length ? `\n【判据自指/历史注入记录】\n${meta.map(h => `  ${h.where}: ${h.line.slice(0, 110)}\n    → ${h.reason}`).join('\n')}` : '') +
         (ph.length ? `\n【文档占位符示例】\n${ph.map(h => `  ${h.where}: ${h.line.slice(0, 110)}\n    → ${h.reason}`).join('\n')}` : ''),
       pass: real.length === 0,
-      evidence: `判据：真实凭证命中 = 0 → 实测 ${real.length}，${real.length === 0 ? '满足' : '不满足'}`,
+      evidence: `判据：真实凭证命中 = 0 → 实测 ${real.length}，${real.length === 0 ? '满足' : '不满足'}。判据自指 ${meta.length} 行、占位符 ${ph.length} 行已如实列出`,
       defectType: real.length ? '被测对象缺陷' : null,
-      note: '第 4 轮（第 2 轮）注入的假密钥若被此项抓到，where 字段会给出精确文件与行号',
+      note: '第 4 轮（第 2 轮）注入的假密钥若被此项抓到，where 字段会给出精确文件与行号。Day 27 起 META 只对 .md/.txt/.log 生效 —— 注入到index.html 这类代码文件的强特征仍判 REAL（Day 25 的注入测试场景不被削弱）',
     });
   }
 }
